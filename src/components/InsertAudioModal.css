@@ -1,0 +1,207 @@
+/* Insert Audio Modal - extends base modal styles from SettingsModal.css */
+
+.insert-modal-content {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    width: 90%;
+    max-width: 460px;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Sections */
+.insert-section {
+    margin-bottom: 1.25rem;
+}
+
+.insert-section:last-child {
+    margin-bottom: 0;
+}
+
+.insert-label {
+    display: block;
+    color: #bbb;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+/* Dropdown select */
+.insert-select {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    color: #e8e8e8;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+    appearance: auto;
+}
+
+.insert-select:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.insert-select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.insert-select option {
+    background: #1a1a2e;
+    color: #e8e8e8;
+}
+
+.mic-select {
+    margin-bottom: 0.75rem;
+}
+
+/* Source mode toggle */
+.source-toggle {
+    display: flex;
+    gap: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.source-btn {
+    flex: 1;
+    padding: 0.6rem 1rem;
+    border: none;
+    background: rgba(255, 255, 255, 0.05);
+    color: #999;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.source-btn:first-child {
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.source-btn:hover:not(.active):not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ccc;
+}
+
+.source-btn.active {
+    background: rgba(102, 126, 234, 0.2);
+    color: #a8b8ff;
+    font-weight: 600;
+}
+
+.source-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* File picker */
+.choose-file-btn {
+    width: 100%;
+    padding: 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: #a8b8ff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.choose-file-btn:hover {
+    background: rgba(102, 126, 234, 0.1);
+    border-color: #667eea;
+}
+
+.file-info {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(102, 126, 234, 0.1);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.file-name {
+    color: #a8b8ff;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.file-size {
+    color: #666;
+    font-size: 0.8rem;
+}
+
+/* Record controls */
+.record-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.record-btn {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: rgba(102, 126, 234, 0.2);
+    color: #a8b8ff;
+    border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.record-btn:hover {
+    background: rgba(102, 126, 234, 0.3);
+}
+
+.record-btn.recording {
+    background: rgba(255, 107, 107, 0.2);
+    color: #ff6b6b;
+    border-color: rgba(255, 107, 107, 0.3);
+    animation: pulse-insert-record 1.5s ease-in-out infinite;
+}
+
+.record-btn.recording:hover {
+    background: rgba(255, 107, 107, 0.3);
+}
+
+@keyframes pulse-insert-record {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.3); }
+    50% { box-shadow: 0 0 0 6px rgba(255, 107, 107, 0); }
+}
+
+/* Primary button */
+.btn-primary {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}

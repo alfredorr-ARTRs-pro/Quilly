@@ -1,0 +1,206 @@
+/* ─── Review Popup ──────────────────────────────────────────────────────────── */
+
+.review-popup {
+    position: fixed;
+    inset: 0;
+    background: #1e1e2e;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+    padding: 16px;
+    max-width: 420px;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+}
+
+/* ─── Slide Animations ──────────────────────────────────────────────────────── */
+
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+}
+
+.slide-in {
+    animation: slideUp 300ms ease-out both;
+}
+
+.slide-out {
+    animation: slideDown 300ms ease-in both;
+}
+
+/* ─── Header ────────────────────────────────────────────────────────────────── */
+
+.review-popup-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.intent-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #a0a0b0;
+    letter-spacing: 0.01em;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 3px;
+    transition: color 0.15s ease;
+}
+
+.close-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Body ──────────────────────────────────────────────────────────────────── */
+
+.review-popup-body {
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #e0e0e0;
+    margin-bottom: 12px;
+    user-select: text;
+    cursor: text;
+    scrollbar-width: thin;
+    scrollbar-color: #444 transparent;
+}
+
+.review-popup-body::-webkit-scrollbar {
+    width: 4px;
+}
+
+.review-popup-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.review-popup-body::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 2px;
+}
+
+/* ─── Footer ────────────────────────────────────────────────────────────────── */
+
+.review-popup-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    background: #2a2a3e;
+    border: 1px solid #444;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.copy-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.copy-btn.copied {
+    color: #4ade80;
+    border-color: #3d7a55;
+}
+
+/* ─── Progress Bar ──────────────────────────────────────────────────────────── */
+
+.progress-bar-track {
+    flex: 1;
+    height: 3px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: #6366f1;
+    border-radius: 2px;
+    transition: width 1s linear;
+}
+
+/* ─── Review-first Mode Buttons ─────────────────────────────────────────────── */
+
+.accept-btn {
+    padding: 8px 18px;
+    border-radius: 6px;
+    background: #22c55e;
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+}
+
+.accept-btn:hover {
+    background: #16a34a;
+}
+
+.dismiss-btn {
+    padding: 8px 18px;
+    border-radius: 6px;
+    background: transparent;
+    color: #888;
+    font-size: 13px;
+    border: 1px solid #555;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dismiss-btn:hover {
+    background: #2a2a3e;
+    color: #ccc;
+}

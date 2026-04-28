@@ -1,0 +1,342 @@
+/* Override global styles for transparent window */
+html,
+body,
+#root {
+    background: transparent !important;
+    background-color: transparent !important;
+    min-height: auto !important;
+    min-width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Minimal cursor-following indicator */
+.indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: rgba(25, 25, 35, 0.95);
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    border: 2px solid transparent;
+    margin: 4px;
+    position: relative;
+    /* Smooth morph transition between states */
+    transition: border-color 0.3s ease, background 0.3s ease, width 0.3s ease, border-radius 0.3s ease;
+}
+
+/* Recording state - expand to pill with timer */
+.indicator.recording {
+    border-color: #ff4444;
+    width: 112px;
+    min-width: 112px;
+    padding: 0 12px;
+    border-radius: 18px;
+    gap: 6px;
+}
+
+/* Optimized pulse animation using pseudo-element and transform/opacity
+   Avoids expensive box-shadow repaints on every frame */
+.indicator.recording::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: 18px;
+    border: 2px solid #ff4444;
+    opacity: 0;
+    z-index: -1;
+    animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Recording timer text */
+.timer {
+    color: #fff;
+    font-size: 13px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    width: 5ch;
+    min-width: 5ch;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-ring {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.8;
+    }
+
+    100% {
+        transform: scale(1.6);
+        opacity: 0;
+    }
+}
+
+/* Processing state (legacy — kept for any references) */
+.indicator.processing {
+    border-color: rgba(150, 130, 255, 0.6);
+}
+
+/* Transcribing state — Whisper running */
+.indicator.transcribing {
+    border-color: rgba(150, 130, 255, 0.6);
+}
+
+/* LLM processing state — slightly warmer purple to distinguish from transcribing */
+.indicator.llm-processing {
+    border-color: rgba(180, 140, 255, 0.7);
+}
+
+/* LLM processing with chain step text — expand to pill */
+.indicator.llm-processing-chain {
+    width: auto;
+    min-width: 36px;
+    padding: 0 12px;
+    border-radius: 18px;
+    gap: 6px;
+}
+
+/* Chain step progress text ("Step 1/2: Translating...") */
+.chain-step-text {
+    color: rgba(200, 180, 255, 0.9);
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    white-space: nowrap;
+    letter-spacing: 0.2px;
+}
+
+/* LLM mode badge shown during transcribing phase */
+.llm-badge {
+    color: rgba(200, 180, 255, 0.9);
+    font-size: 9px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+/* Done state - green */
+.indicator.done {
+    border-color: #4ade80;
+    background: rgba(20, 40, 30, 0.95);
+}
+
+/* Icons */
+.icon {
+    width: 16px;
+    height: 16px;
+}
+
+.mic-icon {
+    color: #ff6b6b;
+    animation: mic-pulse 1s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Preparing State */
+.indicator.preparing {
+    border-color: #ffd700;
+}
+
+.hourglass-icon {
+    color: #ffd700;
+    animation: hour-spin 1.5s ease-in-out infinite;
+}
+
+@keyframes hour-spin {
+    0% {
+        transform: rotate(0deg);
+        opacity: 0.8;
+    }
+
+    50% {
+        transform: rotate(180deg);
+        opacity: 1;
+    }
+
+    100% {
+        transform: rotate(360deg);
+        opacity: 0.8;
+    }
+}
+
+/* Quill icon — writing motion animation */
+.quill-icon {
+    color: rgba(150, 130, 255, 1);
+    animation: quill-write 1.2s ease-in-out infinite;
+}
+
+@keyframes quill-write {
+    0%, 100% {
+        transform: rotate(-5deg) translateY(0);
+    }
+    50% {
+        transform: rotate(5deg) translateY(-1px);
+    }
+}
+
+/* Brain icon — pulsating animation */
+.brain-icon {
+    color: rgba(180, 140, 255, 1);
+    animation: brain-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes brain-pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.85;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+}
+
+.check-icon {
+    color: #4ade80;
+    animation: check-pop 0.5s ease-out;
+}
+
+@keyframes check-pop {
+    0% {
+        transform: scale(0);
+    }
+
+    40% {
+        transform: scale(1.2);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* ─── First-use prompt (UI-03) ─────────────────────────────────────── */
+
+/* Expanded pill that overlays when model is missing on first wake-word trigger */
+.first-use-prompt {
+    display: flex;
+    align-items: center;
+    background: rgba(25, 25, 35, 0.98);
+    border-radius: 12px;
+    padding: 10px 14px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(180, 140, 255, 0.4);
+    min-width: 300px;
+    margin: 4px;
+    animation: prompt-slide-in 0.3s ease-out;
+}
+
+.first-use-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.first-use-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 2px;
+}
+
+.first-use-title {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.3;
+}
+
+.first-use-subtitle {
+    color: rgba(200, 200, 215, 0.75);
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.3;
+}
+
+.first-use-cta {
+    background: rgba(180, 140, 255, 0.9);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+}
+
+.first-use-cta:hover {
+    background: rgba(200, 160, 255, 1);
+}
+
+.first-use-dismiss {
+    background: transparent;
+    color: rgba(200, 200, 215, 0.5);
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+
+.first-use-dismiss:hover {
+    color: rgba(200, 200, 215, 0.9);
+}
+
+/* Static brain icon in first-use prompt — same color, no animation */
+.brain-icon-static {
+    color: rgba(180, 140, 255, 1);
+    flex-shrink: 0;
+}
+
+@keyframes prompt-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(8px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+/* Spinner (legacy — kept for any references) */
+.spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(150, 130, 255, 0.3);
+    border-top-color: rgba(150, 130, 255, 1);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

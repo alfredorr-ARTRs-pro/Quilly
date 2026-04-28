@@ -1,0 +1,12 @@
+# GitHub reads this file and adds a "Sponsor" button at the top of the repo.
+# Donations go to whichever accounts are listed below.
+
+# PayPal — active donation link
+custom:
+  - https://www.paypal.com/donate/?hosted_button_id=EY723ETLSVH9G
+
+# GitHub Sponsors — active
+github: [alfredorr-ARTRs-pro]
+
+# Uncomment when Ko-fi is set up (optional, lower friction for casual donors)
+# ko_fi: aips

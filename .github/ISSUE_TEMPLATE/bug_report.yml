@@ -1,0 +1,88 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Quilly
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Clear reproduction steps help get it fixed faster.
+
+        Before filing, please check [existing issues](https://github.com/alfredorr-ARTRs-pro/Quilly/issues) to see if it's already been reported.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly and concisely.
+      placeholder: When I press Ctrl+Alt+V, the indicator appears but transcription never completes...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: Step-by-step instructions that reliably trigger the bug.
+      placeholder: |
+        1. Open Quilly
+        2. Click the microphone icon
+        3. Speak for 5 seconds
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Quilly version
+      description: Check Dashboard → About, or the installer filename.
+      placeholder: e.g. 1.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10 (64-bit)
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: Are you using a GPU?
+      options:
+        - NVIDIA GPU (CUDA)
+        - CPU only
+        - Not sure
+
+  - type: dropdown
+    id: whisper_model
+    attributes:
+      label: Which Whisper model is selected?
+      options:
+        - Tiny
+        - Base
+        - Small
+        - Medium
+        - Large v3
+        - Not sure
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots (optional)
+      description: Paste relevant error messages, or drop a screenshot here.
+      render: shell

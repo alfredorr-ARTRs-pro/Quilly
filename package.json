@@ -1,0 +1,97 @@
+{
+  "name": "quilly",
+  "private": true,
+  "version": "1.3.0",
+  "description": "Voice to Text Desktop App - Talk more, type less",
+  "author": "Alfredo Rapetta (A.I.P.S. — https://aips.studio)",
+  "homepage": "https://aips.studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alfredorr-ARTRs-pro/Quilly"
+  },
+  "bugs": {
+    "url": "https://github.com/alfredorr-ARTRs-pro/Quilly/issues"
+  },
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "test": "node --test electron/*.test.cjs",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:9500 && electron .\"",
+    "dist": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --win --dir"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "adm-zip": "^0.5.16",
+    "auto-launch": "^5.0.6",
+    "check-disk-space": "^3.4.0",
+    "electron-store": "^11.0.2",
+    "onnxruntime-node": "^1.21.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0",
+    "wavesurfer.js": "^7.12.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "electron": "^40.1.0",
+    "electron-builder": "^26.7.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "vite": "^7.2.4",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "com.quilly.app",
+    "productName": "Quilly",
+    "copyright": "Copyright © 2026 Alfredo Rapetta (A.I.P.S.)",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "asarUnpack": [
+      "**/onnxruntime-node/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico",
+      "executableName": "Quilly",
+      "artifactName": "${productName}-V-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Quilly",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "license": "LICENSE.txt"
+    }
+  }
+}

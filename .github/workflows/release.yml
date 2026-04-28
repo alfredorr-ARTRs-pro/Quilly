@@ -1,0 +1,94 @@
+name: Release
+
+# Triggered when you push a version tag (e.g. `git tag v1.2.1 && git push --tags`)
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build installer & create GitHub Release
+    runs-on: windows-latest
+    permissions:
+      contents: write  # required to create a release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        run: npm run build
+
+      - name: Build Windows installer (electron-builder)
+        run: npx electron-builder --win --publish never
+        env:
+          # Disables electron-builder's own auto-publish; we use softprops below instead.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ──────────────────────────────────────────────────────────────────
+      # SignPath Foundation signing step — ADD ONCE SIGNPATH IS APPROVED
+      # Replace the placeholder with the real action once your project is
+      # registered at https://signpath.org.
+      #
+      # - name: Sign installer via SignPath
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+      #     project-slug: quilly
+      #     signing-policy-slug: release-signing
+      #     artifact-configuration-slug: installer
+      #     github-artifact-id: release
+      #     wait-for-completion: true
+      #     output-artifact-directory: release
+      # ──────────────────────────────────────────────────────────────────
+
+      - name: Compute SHA-256 checksums
+        shell: pwsh
+        run: |
+          $exeFiles = Get-ChildItem -Path "release" -Filter "*.exe" -File
+          foreach ($file in $exeFiles) {
+            $hash = Get-FileHash -Algorithm SHA256 $file.FullName
+            "$($hash.Hash)  $($file.Name)" | Out-File -FilePath "release/$($file.Name).sha256" -Encoding ascii
+            Write-Host "SHA-256 ($($file.Name)): $($hash.Hash)"
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+            release/*.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            ## Installation
+
+            1. Download the `.exe` installer attached below
+            2. Run the installer
+            3. If Windows SmartScreen warns, click **More info → Run anyway** (the installer isn't code-signed yet — see [README](https://github.com/alfredorr-ARTRs-pro/Quilly#about-the-smartscreen-warning) for details)
+
+            ### Verify your download (optional)
+
+            Each installer ships with a matching `.sha256` checksum file. From PowerShell:
+
+            ```powershell
+            Get-FileHash Quilly-V-*-Setup.exe
+            ```
+
+            Compare the output against the contents of the `.sha256` file before running.
+
+            ---
+
+            Built with care by [A.I.P.S.](https://aips.studio)

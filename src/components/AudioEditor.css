@@ -1,0 +1,756 @@
+.audio-editor {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.device-selector-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.device-selector-row label {
+    font-size: 0.85rem;
+    color: #888;
+    white-space: nowrap;
+}
+
+.mic-select {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #ccc;
+    font-size: 0.85rem;
+    cursor: pointer;
+    max-width: 400px;
+}
+
+.mic-select:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.mic-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mic-select option {
+    background: #1a1a2e;
+    color: #ccc;
+}
+
+.refresh-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1rem;
+}
+
+.refresh-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.editor-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.editor-record-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.editor-record-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+}
+
+.editor-record-btn.recording {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+    animation: pulse-record 1.5s ease infinite;
+    will-change: box-shadow, transform;
+}
+
+.record-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.editor-record-btn.recording .record-dot {
+    border-radius: 2px;
+    animation: blink 0.8s ease infinite;
+    will-change: opacity;
+}
+
+.editor-record-btn.preparing {
+    background: linear-gradient(135deg, #fceabb, #f8b500);
+    color: #333;
+    animation: none;
+}
+
+.editor-record-btn.preparing .record-dot {
+    background: #333;
+    border-radius: 50%;
+    animation: pulse 1s infinite;
+}
+
+.editor-play-btn {
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.editor-play-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.editor-play-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.time-display {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.9rem;
+    color: #888;
+}
+
+.time-display .current-time {
+    color: #667eea;
+    font-weight: 600;
+}
+
+.time-display .separator {
+    margin: 0 0.3rem;
+}
+
+.time-display .recording-time {
+    color: #ff4444;
+    font-weight: 600;
+    animation: rec-blink 1s ease-in-out infinite;
+}
+
+@keyframes rec-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.waveform-container {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    min-height: 100px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    transition: opacity 0.2s ease;
+}
+
+.waveform-container.processing {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.waveform-processing {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.5);
+    color: #667eea;
+    font-size: 0.9rem;
+    z-index: 10;
+}
+
+.processing-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(102, 126, 234, 0.3);
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.waveform-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    font-size: 0.9rem;
+}
+
+/* Make split markers appear as thin vertical lines */
+.waveform-container [data-id^="split-marker"] {
+    pointer-events: none !important;
+}
+
+.editor-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.editor-toolbar .tool-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #ccc;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+}
+
+.editor-toolbar .tool-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: white;
+}
+
+.editor-toolbar .tool-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.editor-toolbar .tool-btn.primary {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-color: transparent;
+    color: white;
+}
+
+.editor-toolbar .tool-btn.primary:hover:not(:disabled) {
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+}
+
+.editor-toolbar .tool-btn.danger {
+    border-color: rgba(255, 100, 100, 0.3);
+    color: #ff6b6b;
+}
+
+.editor-toolbar .tool-btn.danger:hover:not(:disabled) {
+    background: rgba(255, 100, 100, 0.15);
+}
+
+@keyframes pulse-record {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 0 8px rgba(255, 107, 107, 0);
+    }
+}
+
+@keyframes blink {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.3;
+    }
+}
+
+/* Segment Timeline Styles */
+.segment-timeline {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.segment-timeline-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+    color: #888;
+}
+
+.edited-duration {
+    color: #667eea;
+    font-weight: 500;
+}
+
+.segment-blocks {
+    display: flex;
+    gap: 4px;
+    min-height: 50px;
+    align-items: stretch;
+}
+
+.segment-block {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+    padding: 0.5rem;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.3));
+    border: 2px solid rgba(102, 126, 234, 0.4);
+    border-radius: 6px;
+    cursor: grab;
+    transition: all 0.2s ease;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.segment-block:hover {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.4), rgba(118, 75, 162, 0.4));
+    border-color: rgba(102, 126, 234, 0.6);
+    transform: translateY(-2px);
+}
+
+.segment-block.selected {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(118, 75, 162, 0.5));
+    border-color: #667eea;
+    box-shadow: 0 0 12px rgba(102, 126, 234, 0.5);
+}
+
+.segment-block.drag-over {
+    border-color: #ff6b6b;
+    border-style: dashed;
+}
+
+.segment-block:active {
+    cursor: grabbing;
+}
+
+.segment-index {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.segment-duration {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+.segment-delete-btn {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: #ff6b6b;
+    color: white;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.segment-delete-btn:hover {
+    background: #ff4757;
+    transform: scale(1.1);
+}
+
+.segment-instructions {
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: #666;
+    text-align: center;
+}
+
+/* Updated toolbar for more buttons */
+.editor-toolbar {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.editor-toolbar .tool-btn {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+.editor-toolbar .tool-btn.project {
+    border-color: rgba(102, 126, 234, 0.4);
+    color: #8b9be0;
+}
+
+.editor-toolbar .tool-btn.project:hover:not(:disabled) {
+    background: rgba(102, 126, 234, 0.15);
+    border-color: rgba(102, 126, 234, 0.6);
+    color: #a0b0f0;
+}
+
+.toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0 0.25rem;
+    align-self: center;
+}
+
+/* Zoom Controls */
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    flex-wrap: wrap;
+}
+
+.zoom-label {
+    font-size: 0.8rem;
+    color: #888;
+    font-weight: 500;
+}
+
+.zoom-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #ccc;
+    font-size: 1.1rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zoom-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: white;
+}
+
+.zoom-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.zoom-presets {
+    display: flex;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px;
+    border-radius: 6px;
+}
+
+.zoom-preset-btn {
+    padding: 0.3rem 0.5rem;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #888;
+    font-size: 0.7rem;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.zoom-preset-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ccc;
+}
+
+.zoom-preset-btn.active {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+}
+
+.zoom-preset-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.zoom-info {
+    font-size: 0.75rem;
+    color: #667eea;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    margin-left: auto;
+}
+
+/* Segment Name Input */
+.segment-name-input {
+    width: 100%;
+    max-width: 80px;
+    padding: 0.2rem 0.3rem;
+    border: 1px solid #667eea;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.4);
+    color: white;
+    font-size: 0.75rem;
+    text-align: center;
+    outline: none;
+}
+
+.segment-name-input:focus {
+    border-color: #8b9be0;
+    box-shadow: 0 0 8px rgba(102, 126, 234, 0.4);
+}
+
+.segment-name-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.segment-index.clickable {
+    cursor: pointer;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.segment-index.clickable:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Segment being dragged */
+.segment-block.dragging {
+    opacity: 0.5;
+    transform: scale(0.95);
+}
+
+/* Drop Zone Styles */
+.drop-zone {
+    width: 4px;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    opacity: 0;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.drop-zone.visible {
+    opacity: 1;
+    width: 20px;
+}
+
+.drop-zone.active {
+    width: 24px;
+}
+
+.drop-indicator {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: transparent;
+    transition: all 0.2s ease;
+}
+
+.drop-zone.visible .drop-indicator {
+    background: rgba(102, 126, 234, 0.2);
+    border: 2px dashed rgba(102, 126, 234, 0.5);
+}
+
+.drop-zone.active .drop-indicator {
+    background: rgba(102, 126, 234, 0.4);
+    border: 2px solid #667eea;
+    box-shadow: 0 0 12px rgba(102, 126, 234, 0.5);
+}
+
+.drop-arrow {
+    color: #667eea;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    animation: bounce 0.6s ease infinite;
+}
+
+.drop-zone.active .drop-arrow {
+    opacity: 1;
+}
+
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(3px);
+    }
+}
+
+/* Make waveform container scrollable when zoomed in */
+.waveform-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(102, 126, 234, 0.5) rgba(0, 0, 0, 0.3);
+}
+
+.waveform-container::-webkit-scrollbar {
+    height: 8px;
+}
+
+.waveform-container::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+}
+
+.waveform-container::-webkit-scrollbar-thumb {
+    background: rgba(102, 126, 234, 0.5);
+    border-radius: 4px;
+}
+
+.waveform-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(102, 126, 234, 0.7);
+}
+
+/* Instruction segment styling */
+.segment-block.instruction {
+    background: rgba(251, 146, 60, 0.15);
+    border-color: rgba(251, 146, 60, 0.5);
+}
+
+.segment-block.instruction:hover {
+    background: rgba(251, 146, 60, 0.25);
+    border-color: rgba(251, 146, 60, 0.7);
+}
+
+.segment-block.instruction.selected {
+    background: rgba(251, 146, 60, 0.3);
+    border-color: rgba(251, 146, 60, 0.9);
+    box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.4);
+}
+
+.instruction-badge {
+    font-size: 10px;
+    color: #fb923c;
+    line-height: 1;
+    flex-shrink: 0;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* Instruction toggle button in toolbar */
+.editor-toolbar .tool-btn.instruction {
+    border-color: rgba(251, 146, 60, 0.3);
+    color: #a88060;
+}
+
+.editor-toolbar .tool-btn.instruction:hover:not(:disabled) {
+    background: rgba(251, 146, 60, 0.15);
+    border-color: rgba(251, 146, 60, 0.6);
+    color: #fb923c;
+}
+
+.editor-toolbar .tool-btn.instruction.active {
+    background: rgba(251, 146, 60, 0.2);
+    border-color: rgba(251, 146, 60, 0.7);
+    color: #fb923c;
+}
+
+.editor-toolbar .tool-btn.instruction.active:hover:not(:disabled) {
+    background: rgba(251, 146, 60, 0.3);
+    border-color: rgba(251, 146, 60, 0.9);
+}
+
+/* Processing segment visual feedback */
+.segment-block.processing-active {
+    animation: processing-pulse 1.5s ease-in-out infinite;
+    will-change: box-shadow;
+}
+
+@keyframes processing-pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(251, 146, 60, 0.3); }
+    50% { box-shadow: 0 0 12px rgba(251, 146, 60, 0.6); }
+}
+
+.segment-block.processing-dim {
+    opacity: 0.5;
+    transition: opacity 0.3s ease;
+}
+
+/* Processing progress indicator in toolbar */
+.processing-progress {
+    font-size: 0.8rem;
+    color: #888;
+    align-self: center;
+    white-space: nowrap;
+}
+
+/* Processing error indicator in toolbar */
+.processing-error {
+    font-size: 0.8rem;
+    color: #ff6b6b;
+    align-self: center;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

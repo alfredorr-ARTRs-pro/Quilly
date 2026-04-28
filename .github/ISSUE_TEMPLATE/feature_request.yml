@@ -1,0 +1,41 @@
+name: Feature Request
+description: Suggest a new feature or an improvement to Quilly
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an idea. For larger changes, consider opening a [Discussion](https://github.com/alfredorr-ARTRs-pro/Quilly/discussions) first so we can align on approach.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the pain point or limitation this feature would address.
+      placeholder: Right now I can't...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like Quilly to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
+      description: Other ways you've thought about solving this.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Would you like to help?
+      options:
+        - label: I'd be willing to help implement this
+        - label: I can help test
+        - label: I can help with documentation

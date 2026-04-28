@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main, latest]
+  pull_request:
+    branches: [main, latest]
+
+# Cancel in-progress runs on new pushes to the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    name: Lint & build (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build renderer (Vite)
+        run: npm run build

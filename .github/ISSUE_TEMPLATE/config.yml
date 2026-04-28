@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/alfredorr-ARTRs-pro/Quilly/discussions/categories/q-a
+    about: For usage help or general questions, please use Discussions instead of Issues.
+
+  - name: Report a security vulnerability
+    url: https://github.com/alfredorr-ARTRs-pro/Quilly/security/advisories/new
+    about: Please report security issues privately via the Security tab.
+
+  - name: Custom AI solutions for your business
+    url: https://aips.studio
+    about: Interested in a tailored AI solution? Visit A.I.P.S. to get in touch.

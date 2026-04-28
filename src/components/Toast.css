@@ -1,0 +1,119 @@
+/* Toast Container - bottom right */
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 10px;
+    z-index: 9999;
+    pointer-events: none;
+}
+
+/* Individual Toast */
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: rgba(30, 30, 50, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    color: #e8e8e8;
+    font-size: 0.9rem;
+    cursor: pointer;
+    pointer-events: auto;
+    animation: toast-enter 0.3s ease;
+    max-width: 350px;
+}
+
+.toast:hover {
+    background: rgba(40, 40, 60, 0.95);
+}
+
+/* Toast types */
+.toast-success {
+    border-color: rgba(100, 200, 100, 0.4);
+}
+
+.toast-success .toast-icon {
+    color: #6fcf6f;
+}
+
+.toast-error {
+    border-color: rgba(255, 100, 100, 0.4);
+}
+
+.toast-error .toast-icon {
+    color: #ff6b6b;
+}
+
+.toast-info {
+    border-color: rgba(100, 150, 255, 0.4);
+}
+
+.toast-info .toast-icon {
+    color: #6b9fff;
+}
+
+.toast-loading {
+    border-color: rgba(180, 130, 255, 0.4);
+}
+
+.toast-loading .toast-icon {
+    color: #b482ff;
+    animation: spin 1s linear infinite;
+}
+
+/* Icon */
+.toast-icon {
+    font-size: 1.1rem;
+    font-weight: bold;
+    flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+}
+
+/* Message */
+.toast-message {
+    flex: 1;
+    line-height: 1.4;
+}
+
+/* Animations */
+@keyframes toast-enter {
+    from {
+        opacity: 0;
+        transform: translateX(100px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.toast-exit {
+    animation: toast-exit 0.3s ease forwards;
+}
+
+@keyframes toast-exit {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(100px);
+    }
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
