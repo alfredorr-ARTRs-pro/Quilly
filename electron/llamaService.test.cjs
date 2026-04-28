@@ -138,9 +138,11 @@ describe('module exports', () => {
             'ensureWhisperUnloaded',
             'enqueue',
             'getNGpuLayers',
+            'holdServer',
             'isPidAlive',
             'pollHealth',
             'postInference',
+            'releaseServerAfterResult',
             'selectModel',
             'waitForDeath',
             'writePid',
@@ -907,6 +909,7 @@ describe('getNGpuLayers', () => {
 
     afterEach(() => {
         _mockGpuResult = null;
+        llamaService.setGpuMode('auto');
     });
 
     test('returns 999 when GPU has cuda12 recommended backend', async () => {
@@ -933,6 +936,22 @@ describe('getNGpuLayers', () => {
         _mockGpuResult = { recommended: 'openblas', gpus: [], nvidia: null, summary: 'No GPU' };
         const layers = await getNGpuLayers();
         assert.strictEqual(layers, 0);
+    });
+
+    test('returns 0 in explicit CPU mode even when CUDA is available', async () => {
+        llamaService.setGpuMode('cpu');
+        _mockGpuResult = { recommended: 'cuda12', gpus: [], nvidia: { cudaVersion: '12.4' }, summary: 'RTX 4060' };
+        const layers = await getNGpuLayers();
+        assert.strictEqual(layers, 0);
+    });
+
+    test('throws in explicit GPU mode when CUDA is unavailable', async () => {
+        llamaService.setGpuMode('gpu');
+        _mockGpuResult = { recommended: 'openblas', gpus: [], nvidia: null, summary: 'Integrated Intel' };
+        await assert.rejects(
+            () => getNGpuLayers(),
+            /GPU mode requested/
+        );
     });
 });
 

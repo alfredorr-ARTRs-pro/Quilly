@@ -37,6 +37,9 @@ let _currentModel = null;
 /** @type {string} User model preference: 'auto', '4b', or '9b' */
 let _modelPreference = 'auto';
 
+/** @type {'auto'|'gpu'|'cpu'} User inference device preference */
+let _gpuMode = 'auto';
+
 /** @type {number|null} PID of the currently running Whisper process, set by setWhisperPid() */
 let _whisperPid = null;
 
@@ -48,6 +51,9 @@ const PORT = 8787;
 
 /** Module-level EventEmitter for lifecycle events */
 const events = new EventEmitter();
+
+let _releaseHoldCount = 0;
+let _releasePending = false;
 
 // ─── PID File Helpers ─────────────────────────────────────────────────────────
 
@@ -364,6 +370,8 @@ const postInference = (port, messages, temperature) =>
  * @returns {Promise<void>}
  */
 const killServer = async () => {
+    _releasePending = false;
+
     if (!_proc) {
         return;
     }
@@ -400,6 +408,31 @@ const killServer = async () => {
     events.emit('killed');
 
     console.log(`[llamaService] Server killed (PID ${pid})`);
+};
+
+const holdServer = () => {
+    _releaseHoldCount++;
+    let released = false;
+
+    return async () => {
+        if (released) return;
+        released = true;
+        _releaseHoldCount = Math.max(0, _releaseHoldCount - 1);
+
+        if (_releaseHoldCount === 0 && _releasePending) {
+            _releasePending = false;
+            await killServer();
+        }
+    };
+};
+
+const releaseServerAfterResult = async () => {
+    if (_releaseHoldCount > 0) {
+        _releasePending = true;
+        return;
+    }
+
+    await killServer();
 };
 
 // ─── Spawn Server ─────────────────────────────────────────────────────────────
@@ -567,9 +600,11 @@ const ensureWhisperUnloaded = async () => {
 /**
  * Return the number of GPU layers to use for llama-server.
  *
- * Uses gpuDetector.detectGpu() to check for CUDA capability:
- *   - cuda12 or cuda11 recommended: return 999 (load all layers on GPU)
- *   - anything else (openblas, etc.): return 0 (CPU-only mode)
+ * Uses gpuDetector.detectGpu() and the user GPU mode to choose CUDA layers:
+ *   - cpu: return 0
+ *   - auto + CUDA: return 999
+ *   - auto without CUDA: return 0
+ *   - gpu without CUDA: throw so the caller sees GPU mode is unavailable
  *
  * gpuDetector is required lazily inside this function to avoid circular
  * dependency at module load time.
@@ -579,12 +614,25 @@ const ensureWhisperUnloaded = async () => {
  * @returns {Promise<number>}
  */
 const getNGpuLayers = async () => {
+    if (_gpuMode === 'cpu') {
+        return 0;
+    }
+
     try {
         const gpuDetector = require('./gpuDetector.cjs');
         const gpu = await gpuDetector.detectGpu();
         const hasUsableCuda = gpu.recommended === 'cuda12' || gpu.recommended === 'cuda11';
-        return hasUsableCuda ? 999 : 0;
+        if (hasUsableCuda) {
+            return 999;
+        }
+        if (_gpuMode === 'gpu') {
+            throw new Error('GPU mode requested but no compatible CUDA GPU was detected');
+        }
+        return 0;
     } catch (err) {
+        if (_gpuMode === 'gpu') {
+            throw err;
+        }
         console.error(`[llamaService] GPU detection failed, defaulting to CPU: ${err.message}`);
         return 0;
     }
@@ -695,6 +743,16 @@ const setModelPreference = (pref) => {
     _modelPreference = pref || 'auto';
 };
 
+/**
+ * Set the user's GPU mode. Called by main process when settings change.
+ * @param {'auto'|'gpu'|'cpu'} mode
+ */
+const setGpuMode = (mode) => {
+    _gpuMode = ['auto', 'gpu', 'cpu'].includes(mode) ? mode : 'auto';
+};
+
+const getGpuMode = () => _gpuMode;
+
 // ─── Request Queue ────────────────────────────────────────────────────────────
 
 /** Promise queue — serializes all infer() calls to prevent concurrent spawn/swap */
@@ -770,8 +828,9 @@ const ensureServer = async (modelKey, modelPath) => {
         // Reset model tracking — server is in unknown state
         _currentModel = null;
 
-        // GPU OOM fallback: retry once on CPU if first attempt used GPU
-        if (nGpuLayers > 0) {
+        // GPU OOM fallback: retry once on CPU in auto mode only.
+        // Explicit GPU mode should fail loudly instead of silently using CPU.
+        if (nGpuLayers > 0 && _gpuMode !== 'gpu') {
             console.log('[llamaService] GPU spawn failed, retrying on CPU...');
 
             // Kill the hung GPU process before retrying
@@ -827,24 +886,29 @@ const ensureServer = async (modelKey, modelPath) => {
 const infer = (intent, messages, temperature) =>
     enqueue(async () => {
         const { modelKey, modelPath } = selectModel(intent);
-        await ensureServer(modelKey, modelPath);
 
         try {
-            return await postInference(PORT, messages, temperature);
-        } catch (inferErr) {
-            // Inference failed — server may have crashed. Retry once.
-            console.error(`[llamaService] Inference failed, retrying after respawn: ${inferErr.message}`);
-
-            await killServer();
             await ensureServer(modelKey, modelPath);
 
             try {
                 return await postInference(PORT, messages, temperature);
-            } catch (retryErr) {
-                const userErr = new Error('LLM processing failed. Please try again.');
-                events.emit('error', userErr);
-                throw userErr;
+            } catch (inferErr) {
+                // Inference failed — server may have crashed. Retry once.
+                console.error(`[llamaService] Inference failed, retrying after respawn: ${inferErr.message}`);
+
+                await killServer();
+                await ensureServer(modelKey, modelPath);
+
+                try {
+                    return await postInference(PORT, messages, temperature);
+                } catch (retryErr) {
+                    const userErr = new Error('LLM processing failed. Please try again.');
+                    events.emit('error', userErr);
+                    throw userErr;
+                }
             }
+        } finally {
+            await releaseServerAfterResult();
         }
     });
 
@@ -862,6 +926,9 @@ module.exports = {
     cleanupZombie,
     setWhisperPid,
     setModelPreference,
+    setGpuMode,
+    getGpuMode,
+    holdServer,
 
     // _internal exposes functions for testing
     _internal: {
@@ -876,6 +943,8 @@ module.exports = {
         enqueue,
         ensureWhisperUnloaded,
         getNGpuLayers,
+        releaseServerAfterResult,
+        holdServer,
         cleanupZombie,
     },
 };

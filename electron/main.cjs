@@ -653,6 +653,35 @@ function sendLlmStatus(status, detail = {}) {
     }
 }
 
+async function shouldUseCudaForLlm(store) {
+    const gpuMode = store.get('llmGpuMode', 'auto');
+    if (gpuMode === 'cpu') return false;
+    if (gpuMode === 'gpu') return true;
+
+    try {
+        const gpu = await gpuDetector.detectGpu();
+        return gpu?.recommended === 'cuda12' || gpu?.recommended === 'cuda11';
+    } catch (err) {
+        console.error('[main] GPU detection failed while selecting LLM runtime:', err.message);
+        return false;
+    }
+}
+
+async function ensureLlamaBinaryForMode(store, sender = null, cancelToken = null) {
+    const useCuda = await shouldUseCudaForLlm(store);
+    if (llamaDownloader.isBinaryCompatibleWithMode?.(useCuda)) {
+        return { success: true, alreadyInstalled: true, useCuda };
+    }
+
+    const result = await llamaDownloader.downloadBinary((progress) => {
+        if (sender && !sender.isDestroyed()) {
+            sender.send('llm:download-progress', { modelId: '__binary__', ...progress });
+        }
+    }, useCuda, cancelToken);
+
+    return { success: true, useCuda, ...result };
+}
+
 // App lifecycle
 app.whenReady().then(() => {
     // Ensures Windows toast notifications display correctly (even in dev builds)
@@ -700,28 +729,26 @@ app.whenReady().then(() => {
     // Load model preference from settings on startup
     getSettingsStore().then(store => {
         llamaService.setModelPreference(store.get('llmModelPreference', 'auto'));
+        llamaService.setGpuMode(store.get('llmGpuMode', 'auto'));
     }).catch(err => console.error('[main] Failed to load startup settings:', err.message));
 
-    // Auto-download llama-server binary on startup if LLM is enabled and a model
-    // exists but the binary hasn't been downloaded yet. Runs in background — no UI block.
+    // Ensure llama-server matches the selected GPU mode when LLM is enabled
+    // and at least one model exists. Runs in background; no UI block.
     getSettingsStore().then(async (store) => {
         const llmEnabled = store.get('llmEnabled', false);
         if (!llmEnabled) return;
-        if (llamaDownloader.findBinary()) return;
 
         // Check if at least one model exists (otherwise binary isn't needed yet)
         const modelStatus = modelRegistry.getModelStatus();
         const anyModelInstalled = Object.values(modelStatus).some(m => m.installed);
         if (!anyModelInstalled) return;
 
-        console.log('[main] LLM enabled with model but no binary — auto-downloading llama-server...');
-        const gpuMode = store.get('llmGpuMode', 'auto');
-        const useCuda = gpuMode !== 'cpu';
+        console.log('[main] LLM enabled with model — ensuring llama-server runtime matches GPU mode...');
         try {
-            await llamaDownloader.downloadBinary(null, useCuda);
-            console.log('[main] Binary auto-download complete');
+            await ensureLlamaBinaryForMode(store);
+            console.log('[main] llama-server runtime ready');
         } catch (err) {
-            console.error('[main] Binary auto-download failed (non-fatal):', err.message);
+            console.error('[main] Binary preparation failed (non-fatal):', err.message);
         }
     }).catch(() => {});
 
@@ -996,16 +1023,22 @@ ipcMain.handle('transcription-complete', async (event, { text, x, y, audioData, 
                 console.log(`[transcription-complete] Model "${neededModelKey}" is downloading — pasting raw text`);
                 sendLlmStatus('idle', { errorType: 'model-downloading', modelId: neededModelKey });
                 textToPaste = text;
-            } else if (!llamaDownloader.findBinary()) {
-                // Binary missing — model exists but llama-server hasn't been downloaded
-                console.log('[transcription-complete] llama-server binary not found — pasting raw text');
-                sendLlmStatus('idle', { errorType: 'binary-missing' });
-                textToPaste = text;
-                new Notification({
-                    title: 'Quilly',
-                    body: 'LLM engine not installed. Open Settings → LLM to download models (binary downloads automatically).',
-                }).show();
             } else {
+                let binaryReady = true;
+                try {
+                    await ensureLlamaBinaryForMode(llmStore, event.sender);
+                } catch (binaryErr) {
+                    binaryReady = false;
+                    console.log('[transcription-complete] llama-server runtime unavailable — pasting raw text:', binaryErr.message);
+                    sendLlmStatus('idle', { errorType: 'binary-missing' });
+                    textToPaste = text;
+                    new Notification({
+                        title: 'Quilly',
+                        body: 'LLM engine is not ready. Open Settings → LLM to download or repair the runtime.',
+                    }).show();
+                }
+
+                if (binaryReady) {
                 // Model is available — run the full LLM pipeline
                 sendLlmStatus('processing');
                 // VRAM-01/02: inform llamaService of the last Whisper subprocess PID so
@@ -1061,10 +1094,16 @@ ipcMain.handle('transcription-complete', async (event, { text, x, y, audioData, 
                             routeResult.targetLanguage.toLowerCase() === 'english' &&
                             !capturedClipboard
                         ) {
+                            const whisperModelId = llmStore.get('whisperModel') || 'Xenova/whisper-small';
+                            const storedWhisperLang = llmStore.get('whisperLanguage') || 'auto';
+                            const whisperPipelineOptions = { modelId: whisperModelId };
+                            if (storedWhisperLang !== 'auto' && !whisperModelId.endsWith('.en')) {
+                                whisperPipelineOptions.language = storedWhisperLang;
+                            }
                             // PROC-06: use processRecording so Whisper --translate mode is available.
                             // processRecording will re-transcribe via whisperCppService and apply the
                             // translate-to-English guard at Step 4 — no LLM invocation needed.
-                            result = await pipeline.processRecording(audioData, capturedClipboard);
+                            result = await pipeline.processRecording(audioData, capturedClipboard, whisperPipelineOptions);
                         } else {
                             const pipelineOpts = llmMode
                                 ? { routeOverride: routeResult }
@@ -1124,6 +1163,7 @@ ipcMain.handle('transcription-complete', async (event, { text, x, y, audioData, 
                     _lastWhisperCppPid = null;
                 }
                 sendLlmStatus('idle');
+                }
             }
             } // end else (llmEnabled)
         }
@@ -1291,7 +1331,16 @@ ipcMain.handle('whisper-transcribe', async (event, audioData, options = {}) => {
     const storedLang = options.language || store.get('whisperLanguage') || 'auto';
     // English-only models don't accept a language param; 'auto' means let Whisper detect
     const language = modelId.endsWith('.en') ? undefined : (storedLang === 'auto' ? undefined : storedLang);
-    const result = await whisperService.transcribe(audioData, { ...options, modelId, language });
+    const result = await whisperService.transcribe(audioData, {
+        ...options,
+        modelId,
+        language,
+        onProgress: (progress) => {
+            if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('whisper-cpp-progress', { type: 'model', ...progress });
+            }
+        },
+    });
     // VRAM-01/02: capture PID from whisperCppService results so llamaService can confirm
     // the Whisper process is dead before loading the LLM server.
     _lastWhisperCppPid = result.pid || null;
@@ -1347,6 +1396,9 @@ ipcMain.handle('settings-set', async (event, key, value) => {
     // Sync model preference to llamaService when changed
     if (key === 'llmModelPreference') {
         llamaService.setModelPreference(value);
+    }
+    if (key === 'llmGpuMode') {
+        llamaService.setGpuMode(value);
     }
     // Re-register global shortcuts when hotkeys change
     if (key === 'hotkeyTranscribe' || key === 'hotkeyLlm') {
@@ -1571,19 +1623,8 @@ ipcMain.handle('llm:download-model', (event, { modelId }) => {
         };
 
         try {
-            // Ensure llama-server binary is downloaded before (or alongside) the model
-            if (!llamaDownloader.findBinary()) {
-                console.log('[llm:download-model] Binary not found — downloading llama-server first...');
-                const store = await getSettingsStore();
-                const gpuMode = store.get('llmGpuMode', 'auto');
-                const useCuda = gpuMode !== 'cpu';
-                await llamaDownloader.downloadBinary((progress) => {
-                    if (event.sender && !event.sender.isDestroyed()) {
-                        event.sender.send('llm:download-progress', { modelId: '__binary__', ...progress });
-                    }
-                }, useCuda, cancelToken);
-                console.log('[llm:download-model] Binary download complete');
-            }
+            const store = await getSettingsStore();
+            await ensureLlamaBinaryForMode(store, event.sender, cancelToken);
 
             await llamaDownloader.downloadModel(modelId, onProgress, cancelToken);
             return { success: true, modelId };
@@ -1606,19 +1647,9 @@ ipcMain.handle('llm:download-model', (event, { modelId }) => {
  * Respects GPU mode setting for CUDA vs CPU variant selection.
  */
 ipcMain.handle('llm:download-binary', async (event) => {
-    if (llamaDownloader.findBinary()) {
-        return { success: true, alreadyInstalled: true };
-    }
     const store = await getSettingsStore();
-    const gpuMode = store.get('llmGpuMode', 'auto');
-    const useCuda = gpuMode !== 'cpu';
     try {
-        const result = await llamaDownloader.downloadBinary((progress) => {
-            if (event.sender && !event.sender.isDestroyed()) {
-                event.sender.send('llm:download-progress', { modelId: '__binary__', ...progress });
-            }
-        }, useCuda);
-        return { success: true, ...result };
+        return await ensureLlamaBinaryForMode(store, event.sender);
     } catch (err) {
         return { success: false, error: err.message };
     }
@@ -1697,6 +1728,7 @@ ipcMain.handle('llm:set-gpu-mode', async (event, mode) => {
     }
     const store = await getSettingsStore();
     store.set('llmGpuMode', mode);
+    llamaService.setGpuMode(mode);
     // Kill llamaService if running so next inference picks up the new mode
     if (llamaService.isRunning()) {
         await llamaService.kill();

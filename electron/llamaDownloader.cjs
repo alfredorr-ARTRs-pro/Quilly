@@ -492,6 +492,40 @@ const updateManifest = (type, id, data) => {
     fs.renameSync(tmpPath, manifestPath);
 };
 
+const readManifest = () => {
+    const manifestPath = path.join(getBasePath(), 'manifest.json');
+    try {
+        if (fs.existsSync(manifestPath)) {
+            return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        }
+    } catch (_) {
+        return {};
+    }
+    return {};
+};
+
+const getBinaryStatus = () => {
+    const binaryPath = findBinary();
+    const manifest = readManifest();
+    const llamaServer = manifest.llamaServer || {};
+
+    return {
+        installed: !!binaryPath,
+        binaryPath,
+        version: llamaServer.version || null,
+        variant: llamaServer.cudaVariant || null,
+    };
+};
+
+const isBinaryCompatibleWithMode = (useCuda) => {
+    const status = getBinaryStatus();
+    if (!status.installed) return false;
+    if (status.version !== PINNED_TAG) return false;
+    if (!useCuda) return true;
+
+    return status.variant === 'cuda-12.4';
+};
+
 // ─── Partial Download Detection ───────────────────────────────────────────────
 
 /**
@@ -704,18 +738,24 @@ const findBinary = () => {
 const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
     const basePath = getBasePath();
     fs.mkdirSync(basePath, { recursive: true });
+    const requestedVariant = useCuda ? 'cuda-12.4' : 'cpu';
 
-    // Check if correct version is already installed via manifest
+    // Check if the correct version AND runtime variant are already installed.
     const manifestPath = path.join(basePath, 'manifest.json');
     if (fs.existsSync(manifestPath) && findBinary()) {
         try {
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-            if (manifest.llamaServer?.version === PINNED_TAG) {
-                console.log(`[llamaDownloader] Binary already installed at correct version (${PINNED_TAG}), skipping download`);
-                return { success: true, binaryPath: findBinary(), tag: PINNED_TAG, variant: useCuda ? 'cuda-12.4' : 'cpu' };
+            const installedVariant = manifest.llamaServer?.cudaVariant || null;
+            if (
+                manifest.llamaServer?.version === PINNED_TAG &&
+                installedVariant === requestedVariant
+            ) {
+                console.log(`[llamaDownloader] Binary already installed at correct version/variant (${PINNED_TAG}, ${requestedVariant}), skipping download`);
+                return { success: true, binaryPath: findBinary(), tag: PINNED_TAG, variant: requestedVariant };
             }
-            // Version mismatch — delete old binary and re-download
-            console.log(`[llamaDownloader] Binary version mismatch: installed=${manifest.llamaServer?.version}, required=${PINNED_TAG}. Re-downloading...`);
+            console.log(
+                `[llamaDownloader] Binary mismatch: installed=${manifest.llamaServer?.version || 'unknown'}/${installedVariant || 'unknown'}, required=${PINNED_TAG}/${requestedVariant}. Re-downloading...`
+            );
         } catch (_) { /* corrupt manifest, proceed with download */ }
     }
 
@@ -770,7 +810,7 @@ const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
         };
     };
 
-    const cudaVariant = useCuda ? 'cuda-12.4' : 'cpu';
+    const cudaVariant = requestedVariant;
     const installedAssets = {};
 
     const progressWrap = (stage, p) => {
@@ -872,6 +912,8 @@ module.exports = {
     getBasePath,
     getModelsPath,
     findBinary,
+    getBinaryStatus,
+    isBinaryCompatibleWithMode,
     checkPartialDownloads,
     validateDownload,
     ensureDiskSpace,

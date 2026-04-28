@@ -210,6 +210,8 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
             const result = await window.electronAPI.changeWhisperModel(modelId);
             if (result.success) {
                 setCurrentModel(modelId);
+                const status = await window.electronAPI.whisperCppStatus?.();
+                if (status) setCppStatus(status);
             } else {
                 setError(result.error || 'Failed to change model');
             }

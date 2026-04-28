@@ -141,10 +141,29 @@ let cppFailCount = 0;
 const MAX_CPP_FAILURES = 3;
 let cppDisabledForSession = false;
 
+const ensureWhisperCppModel = async (modelId, onProgress) => {
+    if (!whisperCpp.findBinary || !whisperCpp.findModel) return false;
+    if (!whisperCpp.findBinary() || whisperCpp.findModel(modelId)) return false;
+
+    try {
+        console.log(`[whisperService] whisper.cpp model missing for ${modelId}; downloading GGML model before transcription...`);
+        const whisperCppDownloader = require('./whisperCppDownloader.cjs');
+        await whisperCppDownloader.downloadModel(modelId, onProgress);
+        return true;
+    } catch (err) {
+        console.warn(`[whisperService] Failed to prepare whisper.cpp model for ${modelId}: ${err.message}`);
+        return false;
+    }
+};
+
 const transcribe = async (audioData, options = {}) => {
     try {
         const modelId = normalizeModelId(options.modelId || DEFAULT_MODEL);
         console.log(`Starting transcription, model: ${modelId}`);
+
+        if (!cppDisabledForSession && !whisperCpp.isAvailable(modelId)) {
+            await ensureWhisperCppModel(modelId, options.onProgress);
+        }
 
         // Try whisper.cpp first (native CUDA on Windows)
         if (!cppDisabledForSession && whisperCpp.isAvailable(modelId)) {
@@ -201,19 +220,20 @@ const transcribe = async (audioData, options = {}) => {
 
         console.log('Transcription output length:', output.text.length);
 
-        // Start idle timer — model will be freed if no transcription for 2 min
-        resetIdleTimer();
-
-        return {
+        // Free the fallback Transformers model immediately after the result is delivered.
+        const response = {
             success: true,
             text: output.text || '',
             segments: output.chunks || [],
             device: currentDevice,
         };
 
+        await dispose();
+        return response;
+
     } catch (error) {
         console.error('Transcription error:', error);
-        resetIdleTimer();
+        await dispose();
         return { success: false, error: error.message };
     }
 };

@@ -317,8 +317,13 @@ const _runLlmPipeline = async (routeResult, rawText, clipboardText, options, use
  * @property {boolean} timedOut - true if LLM call exceeded PIPELINE_TIMEOUT_MS
  */
 const processRecording = async (audioData, clipboardText = null, options = {}) => {
+    const whisperOptions = { modelId: options.modelId };
+    if (options.language) {
+        whisperOptions.language = options.language;
+    }
+
     // Step 1: Transcribe audio via Whisper
-    const rawResult = await whisperCppService.transcribe(audioData, { modelId: options.modelId });
+    const rawResult = await whisperCppService.transcribe(audioData, whisperOptions);
     const rawText = rawResult.text;
 
     // Step 2: Route through intentRouter
@@ -344,9 +349,7 @@ const processRecording = async (audioData, clipboardText = null, options = {}) =
         !clipboardText
     ) {
         if (typeof whisperCppService.translateToEnglish === 'function') {
-            const translatedResult = await whisperCppService.translateToEnglish(audioData, {
-                modelId: options.modelId,
-            });
+            const translatedResult = await whisperCppService.translateToEnglish(audioData, whisperOptions);
             return {
                 output: translatedResult.text,
                 intent: 'translate',
@@ -472,7 +475,11 @@ const processChainedText = async (rawText, routeResults, clipboardText = null, o
     let lastSuccessfulContent = currentContent;
 
     let chainLanguage = null; // Track language from a translate step for downstream preservation
+    const releaseLlmHold = typeof llamaService.holdServer === 'function'
+        ? llamaService.holdServer()
+        : null;
 
+    try {
     for (let i = 0; i < routeResults.length; i++) {
         const routeResult = routeResults[i];
 
@@ -556,6 +563,11 @@ const processChainedText = async (rawText, routeResults, clipboardText = null, o
         chainSteps: routeResults.length,
         stepLabels,
     };
+    } finally {
+        if (releaseLlmHold) {
+            await releaseLlmHold();
+        }
+    }
 };
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
