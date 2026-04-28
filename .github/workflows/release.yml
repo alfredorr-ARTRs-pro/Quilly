@@ -70,9 +70,9 @@ jobs:
           draft: false
           prerelease: false
           body: |
-            ## Quilly ${{ github.ref_name }}
+            ## Quilly ${{ github.ref_name }} Hotfix
 
-            This is the first public release of Quilly, a Windows desktop app for turning speech into text and sending it where you need it with minimal friction.
+            This release fixes a startup issue in the first public build where the Dashboard could open as a blank or black window.
 
             ### Downloads
 
@@ -82,6 +82,7 @@ jobs:
 
             ### Highlights
 
+            - Fixes the Dashboard render crash in the packaged Windows app.
             - Local-first voice transcription workflow for Windows.
             - Desktop tray integration for quick access.
             - Audio import, review, and correction tools.

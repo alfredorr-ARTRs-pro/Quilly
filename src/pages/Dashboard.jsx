@@ -49,7 +49,7 @@ function Dashboard() {
             });
             return unsubscribe;
         }
-    }, [dismissProcessResult, processResult]);
+    }, []);
 
     // UI-05: Listen for deep-link to open SettingsModal at LLM section
     useEffect(() => {
