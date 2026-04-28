@@ -72,7 +72,7 @@ jobs:
           body: |
             ## Quilly ${{ github.ref_name }} Hotfix
 
-            This release fixes a startup issue in the first public build where the Dashboard could open as a blank or black window.
+            This release improves local AI routing so supported GPU systems stay on the GPU more reliably for both transcription and text processing, while also tightening cleanup after results are delivered.
 
             ### Downloads
 
@@ -82,7 +82,9 @@ jobs:
 
             ### Highlights
 
-            - Fixes the Dashboard render crash in the packaged Windows app.
+            - Improves local LLM runtime selection so the correct CUDA build is used when GPU mode is available.
+            - Preserves selected Whisper model and language handling more reliably during translate-to-English flows.
+            - Reduces fallback CPU and memory usage by releasing local AI resources more aggressively after each result.
             - Local-first voice transcription workflow for Windows.
             - Desktop tray integration for quick access.
             - Audio import, review, and correction tools.
@@ -90,7 +92,7 @@ jobs:
 
             ### Important note
 
-            This first public build is not code-signed yet. Windows SmartScreen may show a warning until the installer earns reputation or signing is enabled. If you see that warning, choose **More info** and then **Run anyway** only if you downloaded Quilly from this official release page.
+            This public build is not code-signed yet. Windows SmartScreen may show a warning until the installer earns reputation or signing is enabled. If you see that warning, choose **More info** and then **Run anyway** only if you downloaded Quilly from this official release page.
 
             ### Verify your download
 
