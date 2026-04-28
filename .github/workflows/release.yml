@@ -1,6 +1,7 @@
 name: Release
 
-# Triggered when you push a version tag (e.g. `git tag v1.2.1 && git push --tags`)
+# Triggered when you push a version tag, for example:
+# git tag v1.0.0 public-main && git push public v1.0.0
 on:
   push:
     tags:
@@ -8,10 +9,10 @@ on:
 
 jobs:
   build-and-release:
-    name: Build installer & create GitHub Release
+    name: Build Windows release
     runs-on: windows-latest
     permissions:
-      contents: write  # required to create a release
+      contents: write
 
     steps:
       - name: Checkout
@@ -26,19 +27,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build renderer (Vite)
+      - name: Build renderer
         run: npm run build
 
-      - name: Build Windows installer (electron-builder)
+      - name: Build Windows installer and portable zip
         run: npx electron-builder --win --publish never
         env:
-          # Disables electron-builder's own auto-publish; we use softprops below instead.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ──────────────────────────────────────────────────────────────────
-      # SignPath Foundation signing step — ADD ONCE SIGNPATH IS APPROVED
-      # Replace the placeholder with the real action once your project is
-      # registered at https://signpath.org.
+      # SignPath Foundation signing step - enable once the project is approved.
       #
       # - name: Sign installer via SignPath
       #   uses: signpath/github-action-submit-signing-request@v1
@@ -51,13 +48,12 @@ jobs:
       #     github-artifact-id: release
       #     wait-for-completion: true
       #     output-artifact-directory: release
-      # ──────────────────────────────────────────────────────────────────
 
       - name: Compute SHA-256 checksums
         shell: pwsh
         run: |
-          $exeFiles = Get-ChildItem -Path "release" -Filter "*.exe" -File
-          foreach ($file in $exeFiles) {
+          $releaseFiles = Get-ChildItem -Path "release" -File | Where-Object { $_.Extension -in ".exe", ".zip" }
+          foreach ($file in $releaseFiles) {
             $hash = Get-FileHash -Algorithm SHA256 $file.FullName
             "$($hash.Hash)  $($file.Name)" | Out-File -FilePath "release/$($file.Name).sha256" -Encoding ascii
             Write-Host "SHA-256 ($($file.Name)): $($hash.Hash)"
@@ -68,27 +64,43 @@ jobs:
         with:
           files: |
             release/*.exe
+            release/*.zip
             release/*.sha256
-          generate_release_notes: true
+          generate_release_notes: false
           draft: false
           prerelease: false
           body: |
-            ## Installation
+            ## Quilly ${{ github.ref_name }}
 
-            1. Download the `.exe` installer attached below
-            2. Run the installer
-            3. If Windows SmartScreen warns, click **More info → Run anyway** (the installer isn't code-signed yet — see [README](https://github.com/alfredorr-ARTRs-pro/Quilly#about-the-smartscreen-warning) for details)
+            This is the first public release of Quilly, a Windows desktop app for turning speech into text and sending it where you need it with minimal friction.
 
-            ### Verify your download (optional)
+            ### Downloads
 
-            Each installer ships with a matching `.sha256` checksum file. From PowerShell:
+            - **Windows installer:** download the `Quilly-V-*-Setup.exe` asset for the standard installation experience.
+            - **Portable ZIP:** download the `Quilly-V-*-Portable.zip` asset if you prefer to unpack and run Quilly without an installer.
+            - **Checksums:** each download includes a matching `.sha256` file for verification.
+
+            ### Highlights
+
+            - Local-first voice transcription workflow for Windows.
+            - Desktop tray integration for quick access.
+            - Audio import, review, and correction tools.
+            - Optional local AI setup for enhanced processing.
+
+            ### Important note
+
+            This first public build is not code-signed yet. Windows SmartScreen may show a warning until the installer earns reputation or signing is enabled. If you see that warning, choose **More info** and then **Run anyway** only if you downloaded Quilly from this official release page.
+
+            ### Verify your download
+
+            From PowerShell, run:
 
             ```powershell
-            Get-FileHash Quilly-V-*-Setup.exe
+            Get-FileHash .\Quilly-V-*-Setup.exe -Algorithm SHA256
             ```
 
-            Compare the output against the contents of the `.sha256` file before running.
+            Compare the result with the matching `.sha256` file attached to this release.
 
             ---
 
-            Built with care by [A.I.P.S.](https://aips.studio)
+            Built by [A.I.P.S.](https://aips.studio). Released under the MIT License.

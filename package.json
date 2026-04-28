@@ -75,13 +75,20 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "public/icon.ico",
       "executableName": "Quilly",
-      "artifactName": "${productName}-V-${version}-Setup.${ext}"
+      "artifactName": "${productName}-V-${version}-Portable.${ext}"
     },
     "nsis": {
+      "artifactName": "${productName}-V-${version}-Setup.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
