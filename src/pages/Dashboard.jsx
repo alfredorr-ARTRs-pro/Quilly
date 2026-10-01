@@ -14,8 +14,18 @@ function Dashboard() {
     const [expandedIds, setExpandedIds] = useState(new Set());
     const [copiedId, setCopiedId] = useState(null);
     const [currentAudioBlob, setCurrentAudioBlob] = useState(null);
+    const [editorTranscript, setEditorTranscript] = useState(null);
+    const [editorDiarization, setEditorDiarization] = useState(null);
+    // Speaker diarization UI state — transient only (never persisted), so a
+    // crash mid-job can't strand a stuck "detecting" status.
+    const [diarizingIds, setDiarizingIds] = useState(new Set());
+    const [speakerDialogRecording, setSpeakerDialogRecording] = useState(null);
+    const [diarizeSetupState, setDiarizeSetupState] = useState(null); // null | {recording, progress?}
+    const [speakerExpandedIds, setSpeakerExpandedIds] = useState(new Set());
+    const [diarizeRename, setDiarizeRename] = useState(null); // {recordingId, speakerId, value} | null
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [deepLinkLlm, setDeepLinkLlm] = useState(false);
+    const [developerConfig, setDeveloperConfig] = useState(null);
     const [showGhosts, setShowGhosts] = useState(true);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [isProcessingLlm, setIsProcessingLlm] = useState(false);
@@ -33,10 +43,30 @@ function Dashboard() {
     const resultCopiedTimerRef = useRef(null);
     const resultBodyRef = useRef(null);
     const instructionRef = useRef(null);
+    // done→idle transition timer: must be cancelled when a new Process starts
+    // within the 2s window, or it resets the UI mid-run.
+    const doneTimerRef = useRef(null);
+    const copiedTimerRef = useRef(null);
+    // Shared playback element so history Play clicks don't overlap, plus the
+    // object URL currently backing it (revoked on replace/end to avoid leaks).
+    const playbackAudioRef = useRef(null);
+    const playbackUrlRef = useRef(null);
+
+    const loadDeveloperConfig = useCallback(async () => {
+        if (!window.electronAPI?.developerConfigGet) return;
+        try {
+            const config = await window.electronAPI.developerConfigGet();
+            setDeveloperConfig(config);
+        } catch (err) {
+            console.warn('Failed to load developer configuration:', err);
+        }
+    }, []);
+
     // Load recordings from storage on mount
     useEffect(() => {
         setRecordings(storageService.getAll());
-    }, []);
+        loadDeveloperConfig();
+    }, [loadDeveloperConfig]);
 
     // Listen for recordings from overlay
     useEffect(() => {
@@ -45,6 +75,18 @@ function Dashboard() {
                 console.log('Received recording from overlay:', recording);
                 const newRecording = storageService.add(recording);
                 console.log('Saved to storage:', newRecording);
+                setRecordings(storageService.getAll());
+            });
+            return unsubscribe;
+        }
+    }, []);
+
+    // Deferred updates to an existing entry (save-first flow: an entry is created
+    // as 'transcribing' up front, then patched to 'transcribed'/'failed' here).
+    useEffect(() => {
+        if (window.electronAPI && window.electronAPI.onUpdateRecording) {
+            const unsubscribe = window.electronAPI.onUpdateRecording(({ id, updates }) => {
+                storageService.update(id, updates);
                 setRecordings(storageService.getAll());
             });
             return unsubscribe;
@@ -100,7 +142,8 @@ function Dashboard() {
         try {
             await navigator.clipboard.writeText(text);
             setCopiedId(identifier);
-            setTimeout(() => setCopiedId(null), 1500);
+            if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+            copiedTimerRef.current = setTimeout(() => setCopiedId(null), 1500);
         } catch {
             toast.error('Failed to copy.');
         }
@@ -151,6 +194,181 @@ function Dashboard() {
         setCurrentAudioBlob(blob);
     };
 
+    // Turn a recording's saved audio file into a Blob (mirrors the Play button).
+    const readRecordingBlob = useCallback(async (recording) => {
+        const result = await window.electronAPI.readAudioFile(recording.audioPath);
+        if (!result.success || !result.buffer) {
+            throw new Error(result.error || 'Failed to read audio file');
+        }
+        const ext = recording.audioPath.split('.').pop()?.toLowerCase();
+        const type = ext === 'wav' ? 'audio/wav' : ext === 'mp3' ? 'audio/mpeg' : 'audio/webm';
+        return new Blob([result.buffer], { type });
+    }, []);
+
+    // Send a list recording into the Audio Editor: load its audio into the
+    // waveform and seed the editor with its transcript (and speaker view).
+    const loadRecordingIntoEditor = useCallback(async (recording) => {
+        if (!recording.audioPath) { toast.error('Audio file path missing'); return; }
+        try {
+            const blob = await readRecordingBlob(recording);
+            setCurrentAudioBlob(blob);
+            setEditorTranscript(recording.transcription || null);
+            setEditorDiarization(recording.diarization
+                ? { ...recording.diarization, recordingId: recording.id }
+                : null);
+            document.querySelector('.recorder-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            toast.success('Loaded into editor');
+        } catch (err) {
+            toast.error('Error loading audio: ' + err.message);
+        }
+    }, [readRecordingBlob]);
+
+    // ---------- speaker diarization ----------
+
+    const runDiarization = useCallback(async (recording, numSpeakers) => {
+        setSpeakerDialogRecording(null);
+        if (!recording.audioPath) { toast.error('Audio file path missing'); return; }
+        setDiarizingIds(prev => new Set(prev).add(recording.id));
+        try {
+            const blob = await readRecordingBlob(recording);
+            const { audioArray } = await processAudioForTranscription(blob);
+            const result = await window.electronAPI.diarizeRun(audioArray, numSpeakers);
+            if (result?.success) {
+                const ids = [...new Set(result.segments.map(s => s.speaker))].sort((a, b) => a - b);
+                storageService.update(recording.id, {
+                    diarization: {
+                        segments: result.segments,
+                        speakerNames: Object.fromEntries(ids.map((sp, i) => [String(sp), `Speaker ${i + 1}`])),
+                        numSpeakersRequested: numSpeakers,
+                        createdAt: new Date().toISOString(),
+                    },
+                });
+                setRecordings(storageService.getAll());
+                // Reveal the result immediately — the speaker transcript expands
+                // in place under the recording row.
+                setSpeakerExpandedIds(prev => new Set(prev).add(recording.id));
+                toast.success(`Detected ${ids.length} speaker${ids.length === 1 ? '' : 's'} — transcript below`);
+            } else {
+                toast.error('Speaker detection failed: ' + (result?.error || 'Unknown error'));
+            }
+        } catch (err) {
+            toast.error('Speaker detection error: ' + err.message);
+        } finally {
+            setDiarizingIds(prev => { const next = new Set(prev); next.delete(recording.id); return next; });
+        }
+    }, [readRecordingBlob]);
+
+    const openSpeakersFlow = useCallback(async (recording) => {
+        try {
+            const status = await window.electronAPI.diarizeStatus();
+            if (!status?.installed) { setDiarizeSetupState({ recording }); return; }
+            setSpeakerDialogRecording(recording);
+        } catch (err) {
+            toast.error('Speaker detection unavailable: ' + err.message);
+        }
+    }, []);
+
+    const startDiarizeSetup = useCallback(async () => {
+        const recording = diarizeSetupState?.recording;
+        setDiarizeSetupState({ recording, progress: { stage: 'binary', percent: 0 } });
+        const unsub = window.electronAPI.onDiarizeSetupProgress((progress) => {
+            setDiarizeSetupState(s => (s ? { ...s, progress } : s));
+        });
+        try {
+            const result = await window.electronAPI.diarizeSetup();
+            if (result?.success) {
+                setDiarizeSetupState(null);
+                setSpeakerDialogRecording(recording);
+            } else {
+                toast.error('Download failed: ' + (result?.error || 'Unknown error'));
+                setDiarizeSetupState({ recording });
+            }
+        } finally {
+            unsub();
+        }
+    }, [diarizeSetupState]);
+
+    const renameSpeaker = useCallback((speakerId, name) => {
+        if (!editorDiarization?.recordingId) return;
+        const rec = storageService.getById(editorDiarization.recordingId);
+        if (!rec?.diarization) return;
+        const speakerNames = { ...rec.diarization.speakerNames, [String(speakerId)]: name };
+        storageService.update(rec.id, { diarization: { ...rec.diarization, speakerNames } });
+        setEditorDiarization(d => (d ? { ...d, speakerNames } : d));
+        setRecordings(storageService.getAll());
+    }, [editorDiarization]);
+
+    const fmtClock = (secs) => `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
+
+    const speakerLabel = (recording, speakerId) =>
+        recording.diarization?.speakerNames?.[String(speakerId)] || `Speaker ${speakerId + 1}`;
+
+    const toggleSpeakerExpanded = useCallback((id) => {
+        setSpeakerExpandedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    }, []);
+
+    // Copy the full speaker-attributed transcript, timings included.
+    const copySpeakerTranscript = useCallback(async (recording) => {
+        const d = recording.diarization;
+        if (!d?.segments?.length) return;
+        const text = d.segments
+            .map(s => `${d.speakerNames?.[String(s.speaker)] || `Speaker ${s.speaker + 1}`} [${fmtClock(s.start)}–${fmtClock(s.end)}]: ${s.text}`)
+            .join('\n\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            toast.success('Speaker transcript copied');
+        } catch (err) {
+            toast.error('Copy failed: ' + err.message);
+        }
+    }, []);
+
+    const commitInlineRename = useCallback(() => {
+        if (diarizeRename && diarizeRename.value.trim()) {
+            const rec = storageService.getById(diarizeRename.recordingId);
+            if (rec?.diarization) {
+                const speakerNames = {
+                    ...rec.diarization.speakerNames,
+                    [String(diarizeRename.speakerId)]: diarizeRename.value.trim(),
+                };
+                storageService.update(rec.id, { diarization: { ...rec.diarization, speakerNames } });
+                setRecordings(storageService.getAll());
+            }
+        }
+        setDiarizeRename(null);
+    }, [diarizeRename]);
+
+    // Re-run transcription for a failed entry, in place.
+    const retryTranscription = useCallback(async (recording) => {
+        if (!recording.audioPath) { toast.error('Audio file path missing'); return; }
+        try {
+            storageService.update(recording.id, { status: 'transcribing' });
+            setRecordings(storageService.getAll());
+            const blob = await readRecordingBlob(recording);
+            const { audioArray, durationStr } = await processAudioForTranscription(blob);
+            const result = await window.electronAPI.transcribe(audioArray);
+            if (result?.success && result.text) {
+                storageService.update(recording.id, {
+                    status: 'transcribed',
+                    transcription: result.text.trim(),
+                    duration: durationStr,
+                });
+                toast.success('Transcribed');
+            } else {
+                storageService.update(recording.id, { status: 'failed' });
+                toast.error('Transcription failed' + (result?.error ? ': ' + result.error : ''));
+            }
+            setRecordings(storageService.getAll());
+        } catch (err) {
+            storageService.update(recording.id, { status: 'failed' });
+            setRecordings(storageService.getAll());
+            toast.error('Retry error: ' + err.message);
+        }
+    }, [readRecordingBlob]);
+
     const handleTranscribe = useCallback(async () => {
         // Auto-dismiss result panel on new transcription
         // Note: dismissProcessResult depends on processResult via ref, safe to call inline
@@ -174,7 +392,12 @@ function Dashboard() {
             let audioPath = null;
             try {
                 const arrayBuffer = await blob.arrayBuffer();
-                const saveResult = await window.electronAPI.saveAudioTemp(arrayBuffer);
+                const extension = blob.type.includes('wav')
+                    ? 'wav'
+                    : blob.type.includes('mpeg') || blob.type.includes('mp3')
+                        ? 'mp3'
+                        : 'webm';
+                const saveResult = await window.electronAPI.saveAudioTemp(arrayBuffer, `recording-${Date.now()}.${extension}`);
                 if (saveResult.success) {
                     audioPath = saveResult.path;
                     console.log('Audio saved to temp:', audioPath);
@@ -219,6 +442,16 @@ function Dashboard() {
     // text (PROC-03). The assembled text is routed through transcriptionComplete which runs
     // intentRouter + LLM inference — the same path as hotkey recording.
     const handleProcess = useCallback(async () => {
+        // Save any user edits in an open result panel before overwriting it,
+        // same as handleTranscribe/handleRecordingComplete do.
+        if (processResult) {
+            dismissProcessResult();
+        }
+        // A done→idle timer from the previous run would reset the UI mid-run.
+        if (doneTimerRef.current) {
+            clearTimeout(doneTimerRef.current);
+            doneTimerRef.current = null;
+        }
         setIsProcessingLlm(true);
 
         // Create AbortController for cancel support
@@ -276,7 +509,7 @@ function Dashboard() {
             // PROC-03: concatenate non-instruction segments as content text
             // PROC-04: chain multiple instructions with "and then" so routeChain detects them
             const settings = await window.electronAPI.getSettings();
-            const wakeWord = settings?.wakeWord || 'Quilly';
+            const wakeWord = settings?.wakeWord || 'quilly';
 
             const instructionTexts = transcribedSegments
                 .filter(s => s.isInstruction && s.text)
@@ -349,7 +582,8 @@ function Dashboard() {
                 stepProgress: null,
                 error: null
             });
-            setTimeout(() => {
+            doneTimerRef.current = setTimeout(() => {
+                doneTimerRef.current = null;
                 setProcessingState({
                     phase: 'idle',
                     activeSegmentIndex: null,
@@ -384,7 +618,7 @@ function Dashboard() {
             setIsProcessingLlm(false);
             abortControllerRef.current = null;
         }
-    }, []);
+    }, [processResult, dismissProcessResult]);
 
     const handleCancelProcess = useCallback(() => {
         abortControllerRef.current?.abort();
@@ -435,7 +669,9 @@ function Dashboard() {
             }
 
             setProcessingState({ phase: 'done', activeSegmentIndex: null, stepProgress: null, error: null });
-            setTimeout(() => {
+            if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+            doneTimerRef.current = setTimeout(() => {
+                doneTimerRef.current = null;
                 setProcessingState({ phase: 'idle', activeSegmentIndex: null, stepProgress: null, error: null });
             }, 2000);
         } catch (err) {
@@ -457,6 +693,22 @@ function Dashboard() {
         });
         handleProcess();
     }, [handleProcess]);
+
+    const handlePromptProfileChange = async (profileId) => {
+        try {
+            if (window.electronAPI?.developerConfigSetActive) {
+                const config = await window.electronAPI.developerConfigSetActive(profileId);
+                setDeveloperConfig(config);
+            } else {
+                await window.electronAPI.setSetting('activePromptProfileId', profileId);
+                await loadDeveloperConfig();
+            }
+            toast.success('Configuration switched');
+        } catch (err) {
+            console.error('Failed to switch configuration:', err);
+            toast.error('Failed to switch configuration');
+        }
+    };
 
     const copyTranscription = async (transcription) => {
         if (!transcription) return;
@@ -494,7 +746,22 @@ function Dashboard() {
                         </div>
                         <p className="hotkey-hint">Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>V</kbd> for quick recording overlay</p>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div className="header-actions">
+                        {developerConfig?.enabled && (
+                            <label className="dashboard-profile-selector">
+                                <span>Configuration</span>
+                                <select
+                                    value={developerConfig.activeProfileId}
+                                    onChange={(e) => handlePromptProfileChange(e.target.value)}
+                                >
+                                    {developerConfig.profiles.map(profile => (
+                                        <option key={profile.id} value={profile.id}>
+                                            {profile.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        )}
                         {/* <button
                             className="settings-btn"
                             onClick={() => navigate('/about')}
@@ -528,6 +795,7 @@ function Dashboard() {
                     <AudioEditor
                         ref={audioEditorRef}
                         audioBlob={currentAudioBlob}
+                        initialTranscript={editorTranscript}
                         onTranscribe={handleTranscribe}
                         onProcess={handleProcess}
                         onRecordingComplete={handleRecordingComplete}
@@ -536,6 +804,8 @@ function Dashboard() {
                         processingState={processingState}
                         onCancelProcess={handleCancelProcess}
                         onRetryProcess={handleRetryProcess}
+                        diarization={editorDiarization}
+                        onRenameSpeaker={renameSpeaker}
                     />
                 </section>
 
@@ -719,7 +989,14 @@ function Dashboard() {
                                             />
                                         </td>
                                         <td>{recording.date}</td>
-                                        <td>{recording.duration}</td>
+                                        <td>
+                                            {recording.duration}
+                                            {recording.diarization?.segments?.length > 0 && (
+                                                <span className="speaker-badge" title="Speakers detected">
+                                                    👥 {Object.keys(recording.diarization.speakerNames || {}).length}
+                                                </span>
+                                            )}
+                                        </td>
                                         <td>
                                             <span className={`status-badge ${recording.status}`}>
                                                 {recording.status}
@@ -807,6 +1084,69 @@ function Dashboard() {
                                             ) : (
                                                 <span className="no-transcription">—</span>
                                             )}
+                                            {recording.diarization?.segments?.length > 0 && (
+                                                <div className="speaker-inline-section">
+                                                    <button
+                                                        className="raw-transcription-toggle"
+                                                        onClick={() => toggleSpeakerExpanded(recording.id)}
+                                                    >
+                                                        {speakerExpandedIds.has(recording.id)
+                                                            ? 'Hide speakers'
+                                                            : `Show speakers (${Object.keys(recording.diarization.speakerNames || {}).length})`}
+                                                    </button>
+                                                    {speakerExpandedIds.has(recording.id) && (
+                                                        <div className="speaker-inline-list">
+                                                            <div className="speaker-inline-actions">
+                                                                <button
+                                                                    className="copy-btn-inline"
+                                                                    onClick={() => copySpeakerTranscript(recording)}
+                                                                    title="Copy the full transcript with speaker names and timings"
+                                                                >📋 Copy speaker transcript</button>
+                                                            </div>
+                                                            {recording.diarization.segments.map((seg, idx) => {
+                                                                // Match on the clicked ROW (segIdx), not the speaker id —
+                                                                // one speaker spans many rows, and rendering an autoFocus
+                                                                // input in each row steals focus from the one clicked.
+                                                                const isRenaming = diarizeRename
+                                                                    && diarizeRename.recordingId === recording.id
+                                                                    && diarizeRename.segIdx === idx;
+                                                                return (
+                                                                    <div key={idx} className="speaker-inline-row">
+                                                                        {isRenaming ? (
+                                                                            <input
+                                                                                className="speaker-inline-rename"
+                                                                                value={diarizeRename.value}
+                                                                                autoFocus
+                                                                                onChange={(e) => setDiarizeRename({ ...diarizeRename, value: e.target.value })}
+                                                                                onBlur={commitInlineRename}
+                                                                                onKeyDown={(e) => {
+                                                                                    if (e.key === 'Enter') commitInlineRename();
+                                                                                    if (e.key === 'Escape') setDiarizeRename(null);
+                                                                                }}
+                                                                            />
+                                                                        ) : (
+                                                                            <button
+                                                                                className="speaker-inline-name"
+                                                                                title="Click to rename this speaker"
+                                                                                onClick={() => setDiarizeRename({
+                                                                                    recordingId: recording.id,
+                                                                                    speakerId: seg.speaker,
+                                                                                    segIdx: idx,
+                                                                                    value: speakerLabel(recording, seg.speaker),
+                                                                                })}
+                                                                            >{speakerLabel(recording, seg.speaker)}</button>
+                                                                        )}
+                                                                        <span className="speaker-inline-time">
+                                                                            {fmtClock(seg.start)}–{fmtClock(seg.end)}
+                                                                        </span>
+                                                                        <span className="speaker-inline-text">{seg.text}</span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="actions-cell">
                                             {recording.isGhost && (
@@ -842,9 +1182,33 @@ function Dashboard() {
                                                     try {
                                                         const result = await window.electronAPI.readAudioFile(recording.audioPath);
                                                         if (result.success && result.buffer) {
-                                                            const blob = new Blob([result.buffer], { type: 'audio/webm' });
+                                                            const extension = recording.audioPath.split('.').pop()?.toLowerCase();
+                                                            const type = extension === 'wav'
+                                                                ? 'audio/wav'
+                                                                : extension === 'mp3'
+                                                                    ? 'audio/mpeg'
+                                                                    : 'audio/webm';
+                                                            const blob = new Blob([result.buffer], { type });
+                                                            // Stop any previous playback and release its blob URL —
+                                                            // otherwise every click leaks the full audio buffer and
+                                                            // playbacks overlap.
+                                                            if (playbackAudioRef.current) {
+                                                                playbackAudioRef.current.pause();
+                                                            }
+                                                            if (playbackUrlRef.current) {
+                                                                URL.revokeObjectURL(playbackUrlRef.current);
+                                                            }
                                                             const url = URL.createObjectURL(blob);
                                                             const audio = new Audio(url);
+                                                            playbackAudioRef.current = audio;
+                                                            playbackUrlRef.current = url;
+                                                            audio.onended = () => {
+                                                                if (playbackUrlRef.current === url) {
+                                                                    URL.revokeObjectURL(url);
+                                                                    playbackUrlRef.current = null;
+                                                                    playbackAudioRef.current = null;
+                                                                }
+                                                            };
                                                             audio.play();
                                                             toast.success('Playing audio...');
                                                         } else {
@@ -855,7 +1219,23 @@ function Dashboard() {
                                                     }
                                                 }}
                                             >▶️</button>
-                                            {/* Transcribe button removed as per request */}
+                                            <button
+                                                title="Edit in Audio Editor"
+                                                onClick={() => loadRecordingIntoEditor(recording)}
+                                                disabled={!recording.audioPath}
+                                            >✎</button>
+                                            <button
+                                                title="Detect speakers"
+                                                onClick={() => openSpeakersFlow(recording)}
+                                                disabled={!recording.audioPath || diarizingIds.has(recording.id)}
+                                            >{diarizingIds.has(recording.id) ? '⏳' : '👥'}</button>
+                                            {recording.status === 'failed' && (
+                                                <button
+                                                    title="Retry transcription"
+                                                    onClick={() => retryTranscription(recording)}
+                                                    disabled={!recording.audioPath}
+                                                >🔁</button>
+                                            )}
                                             <button
                                                 title="Copy Text"
                                                 onClick={() => copyTranscription(recording.transcription)}
@@ -894,11 +1274,65 @@ function Dashboard() {
             {/* Modals */}
             <SettingsModal
                 isOpen={isSettingsOpen}
-                onClose={() => setIsSettingsOpen(false)}
+                onClose={() => {
+                    setIsSettingsOpen(false);
+                    loadDeveloperConfig();
+                }}
                 deepLinkLlm={deepLinkLlm}
                 onDeepLinkConsumed={() => setDeepLinkLlm(false)}
             />
             <FirstRunModal />
+
+            {/* Speaker-count dialog (diarization) */}
+            {speakerDialogRecording && (
+                <div className="diarize-dialog-overlay" onClick={() => setSpeakerDialogRecording(null)}>
+                    <div className="diarize-dialog" onClick={(e) => e.stopPropagation()}>
+                        <h4>How many speakers?</h4>
+                        <p className="diarize-dialog-hint">
+                            Pick a count if you know it — detection is more accurate. Auto works when you don&apos;t.
+                        </p>
+                        <div className="diarize-dialog-options">
+                            <button className="diarize-option primary" onClick={() => runDiarization(speakerDialogRecording, null)}>Auto</button>
+                            {[2, 3, 4, 5].map(n => (
+                                <button key={n} className="diarize-option" onClick={() => runDiarization(speakerDialogRecording, n)}>{n}</button>
+                            ))}
+                        </div>
+                        <button className="diarize-dialog-cancel" onClick={() => setSpeakerDialogRecording(null)}>Cancel</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Speaker-engine download consent + progress (diarization) */}
+            {diarizeSetupState && (
+                <div className="diarize-dialog-overlay" onClick={() => { if (!diarizeSetupState.progress) setDiarizeSetupState(null); }}>
+                    <div className="diarize-dialog" onClick={(e) => e.stopPropagation()}>
+                        <h4>Speaker detection engine</h4>
+                        <p className="diarize-dialog-hint">
+                            Detecting speakers needs a one-time download (~65 MB: engine + voice models). Everything runs locally.
+                        </p>
+                        {diarizeSetupState.progress ? (
+                            <div className="diarize-setup-progress">
+                                <div className="diarize-progress-track">
+                                    <div
+                                        className="diarize-progress-fill"
+                                        style={{ width: `${diarizeSetupState.progress.percent || 0}%` }}
+                                    />
+                                </div>
+                                <span className="diarize-progress-label">
+                                    {diarizeSetupState.progress.stage === 'extracting'
+                                        ? 'Extracting…'
+                                        : `Downloading ${diarizeSetupState.progress.stage} — ${diarizeSetupState.progress.percent || 0}%`}
+                                </span>
+                            </div>
+                        ) : (
+                            <div className="diarize-dialog-options">
+                                <button className="diarize-option primary" onClick={startDiarizeSetup}>Download</button>
+                                <button className="diarize-dialog-cancel" onClick={() => setDiarizeSetupState(null)}>Cancel</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Toast notifications */}
             <ToastContainer />

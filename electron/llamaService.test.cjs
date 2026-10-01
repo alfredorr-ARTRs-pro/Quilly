@@ -79,6 +79,7 @@ const llamaService = require('./llamaService.cjs');
 const {
     pollHealth,
     postInference,
+    postInferenceStreaming,
     isPidAlive,
     waitForDeath,
     writePid,
@@ -142,11 +143,16 @@ describe('module exports', () => {
             'isPidAlive',
             'pollHealth',
             'postInference',
+            'postInferenceStreaming',
             'releaseServerAfterResult',
             'selectModel',
             'waitForDeath',
             'writePid',
         ].sort());
+    });
+
+    test('exports inferWithModelStreaming as a function', () => {
+        assert.strictEqual(typeof llamaService.inferWithModelStreaming, 'function');
     });
 
     test('exports cleanupZombie as a function', () => {
@@ -1056,6 +1062,138 @@ describe('infer crash retry', () => {
                 return true;
             }
         );
+    });
+});
+
+// ─── postInferenceStreaming ───────────────────────────────────────────────────
+
+const writeSseEvent = (res, payload) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+};
+
+describe('postInferenceStreaming', () => {
+    test('emits per-delta chunks and resolves with full content', async () => {
+        const deltas = ['Hello', ' ', 'world', '!'];
+        const server = await createMockServer((req, res) => {
+            let body = '';
+            req.on('data', d => (body += d));
+            req.on('end', () => {
+                const parsed = JSON.parse(body);
+                assert.strictEqual(parsed.stream, true);
+                res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+                for (const delta of deltas) {
+                    writeSseEvent(res, { choices: [{ delta: { content: delta } }] });
+                }
+                res.write('data: [DONE]\n\n');
+                res.end();
+            });
+        });
+        const { port } = server.address();
+
+        const collected = [];
+        try {
+            const result = await postInferenceStreaming(
+                port,
+                [{ role: 'user', content: 'hi' }],
+                0.5,
+                512,
+                (delta) => collected.push(delta)
+            );
+            assert.deepStrictEqual(collected, deltas);
+            assert.strictEqual(result, 'Hello world!');
+        } finally {
+            await stopServer(server);
+        }
+    });
+
+    test('sends max_tokens when provided', async () => {
+        let receivedBody = null;
+        const server = await createMockServer((req, res) => {
+            let body = '';
+            req.on('data', d => (body += d));
+            req.on('end', () => {
+                receivedBody = JSON.parse(body);
+                res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+                writeSseEvent(res, { choices: [{ delta: { content: 'ok' } }] });
+                res.write('data: [DONE]\n\n');
+                res.end();
+            });
+        });
+        const { port } = server.address();
+
+        try {
+            await postInferenceStreaming(port, [{ role: 'user', content: 'x' }], 0.1, 256, () => {});
+            assert.strictEqual(receivedBody.max_tokens, 256);
+            assert.strictEqual(receivedBody.stream, true);
+        } finally {
+            await stopServer(server);
+        }
+    });
+
+    test('listener errors do not break the stream', async () => {
+        const server = await createMockServer((req, res) => {
+            let body = '';
+            req.on('data', d => (body += d));
+            req.on('end', () => {
+                res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+                writeSseEvent(res, { choices: [{ delta: { content: 'a' } }] });
+                writeSseEvent(res, { choices: [{ delta: { content: 'b' } }] });
+                res.write('data: [DONE]\n\n');
+                res.end();
+            });
+        });
+        const { port } = server.address();
+
+        try {
+            const result = await postInferenceStreaming(
+                port,
+                [{ role: 'user', content: 'x' }],
+                0.1,
+                null,
+                () => { throw new Error('listener boom'); }
+            );
+            assert.strictEqual(result, 'ab');
+        } finally {
+            await stopServer(server);
+        }
+    });
+
+    test('rejects when server returns non-200', async () => {
+        const server = await createMockServer((req, res) => {
+            res.writeHead(500);
+            res.end('boom');
+        });
+        const { port } = server.address();
+
+        try {
+            await assert.rejects(
+                () => postInferenceStreaming(port, [{ role: 'user', content: 'x' }], 0.1, null, () => {}),
+                (err) => err instanceof Error && /status 500/.test(err.message)
+            );
+        } finally {
+            await stopServer(server);
+        }
+    });
+
+    test('rejects when stream ends with no content and no [DONE]', async () => {
+        const server = await createMockServer((req, res) => {
+            let body = '';
+            req.on('data', d => (body += d));
+            req.on('end', () => {
+                res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+                res.end();
+            });
+        });
+        const { port } = server.address();
+
+        try {
+            await assert.rejects(
+                () => postInferenceStreaming(port, [{ role: 'user', content: 'x' }], 0.1, null, () => {}),
+                (err) => err instanceof Error && /without content/.test(err.message)
+            );
+        } finally {
+            await stopServer(server);
+        }
     });
 });
 

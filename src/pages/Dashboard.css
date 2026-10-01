@@ -27,6 +27,39 @@
     text-align: left;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.dashboard-profile-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #9ca3af;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.dashboard-profile-selector select {
+    min-width: 180px;
+    max-width: 260px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f2f2f2;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    font: inherit;
+}
+
+.dashboard-profile-selector option {
+    background: #1a1a2e;
+    color: #f2f2f2;
+}
+
 .title-row {
     display: flex;
     align-items: center;
@@ -856,4 +889,186 @@
     50% {
         opacity: 0.5;
     }
+}
+
+/* ─── Speaker diarization ─────────────────────────────────────────────────── */
+
+.speaker-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    font-size: 0.75rem;
+    background: rgba(102, 126, 234, 0.25);
+    border: 1px solid rgba(102, 126, 234, 0.5);
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.diarize-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.diarize-dialog {
+    background: #1a1a2e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    padding: 24px;
+    width: 340px;
+    max-width: 90vw;
+    text-align: center;
+}
+
+.diarize-dialog h4 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+}
+
+.diarize-dialog-hint {
+    margin: 0 0 16px;
+    font-size: 0.85rem;
+    opacity: 0.7;
+    line-height: 1.4;
+}
+
+.diarize-dialog-options {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.diarize-option {
+    min-width: 48px;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: inherit;
+    cursor: pointer;
+}
+
+.diarize-option:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.diarize-option.primary {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-color: transparent;
+}
+
+.diarize-dialog-cancel {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.diarize-dialog-cancel:hover {
+    opacity: 1;
+}
+
+.diarize-setup-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+}
+
+.diarize-progress-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.diarize-progress-fill {
+    height: 100%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-radius: 4px;
+    transition: width 0.2s ease;
+}
+
+.diarize-progress-label {
+    font-size: 0.8rem;
+    opacity: 0.7;
+}
+
+/* Inline speaker transcript in the history rows */
+
+.speaker-inline-section {
+    margin-top: 6px;
+}
+
+.speaker-inline-list {
+    margin-top: 8px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.speaker-inline-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.speaker-inline-row {
+    display: grid;
+    grid-template-columns: minmax(90px, auto) auto 1fr;
+    gap: 10px;
+    align-items: baseline;
+}
+
+.speaker-inline-name {
+    padding: 1px 10px;
+    background: rgba(102, 126, 234, 0.25);
+    border: 1px solid rgba(102, 126, 234, 0.5);
+    border-radius: 10px;
+    color: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.speaker-inline-name:hover {
+    background: rgba(102, 126, 234, 0.45);
+}
+
+.speaker-inline-rename {
+    width: 120px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.4);
+    color: inherit;
+    font-size: 0.75rem;
+}
+
+.speaker-inline-time {
+    font-size: 0.72rem;
+    opacity: 0.55;
+    white-space: nowrap;
+}
+
+.speaker-inline-text {
+    font-size: 0.85rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
 }

@@ -13,6 +13,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { app, dialog } = require('electron');
 const EventEmitter = require('events');
+const platformUtils = require('./platformUtils.cjs');
 
 // ─── Module-level EventEmitter ─────────────────────────────────────────────────
 
@@ -20,30 +21,45 @@ const emitter = new EventEmitter();
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PINNED_TAG = 'b8198';
+// b9859 (2026-07-01) — bumped from b8198 (2026-03-04) to support post-March-2026
+// model families (Qwen 3.6, Gemma 4). llama-server flags used by llamaService
+// (--model/--port/--host/--n-gpu-layers/--ctx-size/--parallel, plus --n-cpu-moe)
+// verified current against the b9859-era server docs on 2026-07-02.
+const PINNED_TAG = 'b9859';
 // Pinned to specific tag — MDL-10 requires reproducible binary, never use the latest-release endpoint
-const GITHUB_API_PINNED = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/b8198';
+const GITHUB_API_PINNED = `https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/${PINNED_TAG}`;
 
-// Known asset names for b8198 (confirmed via GitHub API 2026-03-05)
+// Known asset names for b9859 (confirmed via GitHub API 2026-07-02)
 // Literal strings — changing these requires a new PINNED_TAG
-const CUDA_MAIN_ASSET   = 'llama-b8198-bin-win-cuda-12.4-x64.zip';
+const CUDA_MAIN_ASSET   = 'llama-b9859-bin-win-cuda-12.4-x64.zip';
 const CUDA_RT_ASSET     = 'cudart-llama-bin-win-cuda-12.4-x64.zip';
-const CPU_ASSET         = 'llama-b8198-bin-win-cpu-x64.zip';
+const CPU_ASSET         = 'llama-b9859-bin-win-cpu-x64.zip';
+// macOS Apple Silicon build — single tarball with Metal enabled, dylibs
+// colocated with the binaries (no CUDA/cudart concept).
+const MAC_ASSET         = 'llama-b9859-bin-macos-arm64.tar.gz';
 
-const LLAMA_BINARY_NAME = 'llama-server.exe';
+const IS_MAC = process.platform === 'darwin';
+const LLAMA_BINARY_NAME = IS_MAC ? 'llama-server' : 'llama-server.exe';
 
+// Sizes + sha256 from the GitHub API digest fields; the CPU zip was also
+// downloaded locally on 2026-07-02 and its hash matched. The macOS tarball
+// was downloaded and hashed locally on 2026-07-04.
 const EXPECTED_LLAMA_ASSETS = {
     [CUDA_MAIN_ASSET]: {
-        size: 220_432_377,
-        sha256: 'efaa4e1f9c81172dd8b21a424917c3d12ba6925ce6f86d9be8ab897dd52e8635',
+        size: 266_068_914,
+        sha256: '05ae4f4f0b141a11c72dd18b58af28356725be99f2bdd1867e3787601b3de9ec',
     },
     [CUDA_RT_ASSET]: {
         size: 391_443_627,
         sha256: '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6',
     },
     [CPU_ASSET]: {
-        size: 31_439_203,
-        sha256: '4e3fb9f8814dbb2923ed7c4c1c98a9cdcd865f9d75fa086915bef476119db5ec',
+        size: 17_478_474,
+        sha256: 'c9aa80f233a7d1749341860f11723b912d4cfd6eec19434c3d00bba0abc9f85c',
+    },
+    [MAC_ASSET]: {
+        size: 11_134_464,
+        sha256: '21e720ac103d28d7585a52b8023fb86fc0736c90ad92c1e75053207630e90df6',
     },
 };
 
@@ -52,7 +68,10 @@ const EXPECTED_LLAMA_ASSETS = {
 /**
  * Available GGUF models — Qwen 3.5 from unsloth's quantized GGUF repos on HuggingFace.
  * Both models handle all intents; model selection is based on user preference.
- * sizeApprox is used for disk space pre-check; actual validation uses HTTP content-length.
+ * sizeApprox MUST be the exact byte count of the pinned artifact (copy it from
+ * the HF file listing, never estimate): downloads are validated against it with
+ * an exact match and deleted on mismatch, and the already-installed skip check
+ * compares with ===.
  */
 const MODELS = {
     'qwen3.5-4b': {
@@ -70,6 +89,23 @@ const MODELS = {
         sizeApprox: 5_680_522_464,  // ~5.29 GiB
         sha256: '03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8',
         url: 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf',
+    },
+    // Max tier — Qwen3.6 MoE (35B total / ~3B active, Apache 2.0). Decodes at
+    // roughly 4B-dense speed but needs the full ~21GB of weights in memory:
+    // main.cjs gates the download on total system RAM. Requires llama-server
+    // ≥ b93xx (Qwen3.6 support) — covered by PINNED_TAG b9859.
+    'qwen3.6-35b-a3b': {
+        repo: 'unsloth/Qwen3.6-35B-A3B-GGUF',
+        revision: 'a483e9e6cbd595906af30beda3187c2663a1118c',
+        filename: 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf',
+        sizeApprox: 22_360_456_160,  // ~20.8 GiB
+        sha256: '707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450',
+        url: 'https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf',
+        // Keep the MoE expert weights on CPU: consumer GPUs (6-12GB VRAM)
+        // cannot hold 21GB of weights, and with only ~3B active parameters the
+        // CPU-resident experts still decode at usable speed while attention
+        // runs on the GPU. Harmless in pure-CPU mode.
+        extraServerArgs: ['--n-cpu-moe', '999'],
     },
 };
 
@@ -121,9 +157,16 @@ const httpGet = (url, options = {}) => {
         };
 
         const req = client.request(reqOptions, (res) => {
-            // Follow redirects (301, 302, 307, 308)
+            // Follow redirects (301, 302, 307, 308) — bounded, and with the 3xx
+            // body drained so keep-alive sockets are not leaked per hop.
             if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                resolve(httpGet(res.headers.location, options));
+                const depth = options._redirectDepth || 0;
+                res.resume();
+                if (depth >= 5) {
+                    reject(new Error(`Too many redirects for ${url}`));
+                    return;
+                }
+                resolve(httpGet(res.headers.location, { ...options, _redirectDepth: depth + 1 }));
                 return;
             }
             // Accept 200 (full content), 206 (partial content/range honored), and 416
@@ -157,17 +200,19 @@ const httpGet = (url, options = {}) => {
  * Progress: emits {percent, speed, eta, bytesDownloaded, totalBytes} on each chunk.
  * speed is bytes/sec; eta is seconds remaining (null if unknown).
  *
- * SHA256: computed streaming during download via crypto.createHash — no extra disk read.
+ * Integrity: NOT verified here — callers validate the finished file against
+ * pinned size+sha256 via validateDownload().
  *
- * Cancellation: cancelToken = { cancel: null }. After the request starts, cancelToken.cancel
- * is set to a function that destroys the request and rejects with Error('Download cancelled').
+ * Cancellation: cancelToken = { cancel: null, cancelled?: boolean }. Setting
+ * cancelToken.cancelled (directly or via the cancel() function this installs)
+ * aborts at the next phase boundary and rejects with Error('Download cancelled').
  * The .partial file is kept on cancel for future resume.
  *
  * @param {string} url
  * @param {string} destPath
  * @param {function} [onProgress] - ({percent, speed, eta, bytesDownloaded, totalBytes}) => void
- * @param {{ cancel: function|null }} [cancelToken]
- * @returns {Promise<{ path: string, sha256: string, totalSize: number }>}
+ * @param {{ cancel: function|null, cancelled?: boolean }} [cancelToken]
+ * @returns {Promise<{ path: string, totalSize: number }>}
  */
 const downloadFile = async (url, destPath, onProgress, cancelToken) => {
     const partialPath = destPath + '.partial';
@@ -183,15 +228,32 @@ const downloadFile = async (url, destPath, onProgress, cancelToken) => {
         headers['Range'] = `bytes=${resumeFrom}-`;
     }
 
+    // Cancellation uses a PERSISTENT token.cancelled flag (not just the
+    // re-wired token.cancel function): a cancel that lands while this download
+    // is queued, connecting, or between retry attempts must survive into the
+    // next phase/attempt, or the download silently resurrects.
+    if (cancelToken) {
+        if (cancelToken.cancelled) {
+            throw new Error('Download cancelled');
+        }
+        cancelToken.cancel = () => { cancelToken.cancelled = true; };
+    }
+
     const res = await httpGet(url, { headers });
+
+    if (cancelToken?.cancelled) {
+        res.destroy();
+        throw new Error('Download cancelled');
+    }
 
     // ── Handle 416: range out of bounds — file is already complete ───────────
     if (res.statusCode === 416) {
+        res.resume();
         if (fs.existsSync(partialPath)) {
             fs.renameSync(partialPath, destPath);
         }
         const actualSize = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
-        return { path: destPath, sha256: null, totalSize: actualSize };
+        return { path: destPath, totalSize: actualSize };
     }
 
     // ── Determine actual start position and total size ───────────────────────
@@ -209,28 +271,52 @@ const downloadFile = async (url, destPath, onProgress, cancelToken) => {
     const fileFlags = (res.statusCode === 206 && startFrom > 0) ? 'a' : 'w';
     const fileStream = fs.createWriteStream(partialPath, { flags: fileFlags });
 
-    // ── Set up SHA256 streaming hash ─────────────────────────────────────────
-    const hash = crypto.createHash('sha256');
+    // No streaming hash here: every caller validates the finished file against
+    // pinned size+sha256 via validateDownload (a streaming digest would be
+    // wrong on resumed downloads anyway — it only covers appended bytes).
 
     // ── Track progress timing ────────────────────────────────────────────────
     const startTime = Date.now();
     let bytesDownloaded = startFrom;
 
     return new Promise((resolve, reject) => {
+        // Settle-once guard: cancel, stream error, stall, and finish can race.
+        let settled = false;
+        let stallTimer = null;
+        const fail = (err) => {
+            if (settled) return;
+            settled = true;
+            if (stallTimer) clearTimeout(stallTimer);
+            res.destroy();
+            fileStream.destroy();
+            // Keep .partial file for future resume — do NOT delete
+            reject(err);
+        };
+
+        // Stall watchdog: a socket that dies silently after headers (observed
+        // live 2026-07-02: 0 bytes written, connection never closed) would
+        // otherwise hang this promise — and the serialized binary-download
+        // chain behind it — forever. No data for 60s → fail → retry loop
+        // takes over with a fresh connection (resume supported).
+        const armStallTimer = () => {
+            if (stallTimer) clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+                fail(new Error('Download stalled — no data received for 60s'));
+            }, 60_000);
+        };
+        armStallTimer();
+
         // ── Set up cancellation ──────────────────────────────────────────────
         if (cancelToken) {
             cancelToken.cancel = () => {
-                res.destroy();
-                fileStream.destroy();
-                // Keep .partial file for future resume — do NOT delete
-                reject(new Error('Download cancelled'));
+                cancelToken.cancelled = true;
+                fail(new Error('Download cancelled'));
             };
         }
 
         res.on('data', (chunk) => {
+            armStallTimer();
             bytesDownloaded += chunk.length;
-            fileStream.write(chunk);
-            hash.update(chunk);  // SHA256 update on each chunk — no extra disk read
 
             if (onProgress && totalBytes > 0) {
                 const elapsedSec = (Date.now() - startTime) / 1000;
@@ -249,24 +335,43 @@ const downloadFile = async (url, destPath, onProgress, cancelToken) => {
             }
         });
 
-        res.on('end', () => {
-            fileStream.end(() => {
-                // Compute final SHA256 digest
-                const sha256 = hash.digest('hex');
-                // Rename .partial to final path on success
-                try {
-                    fs.renameSync(partialPath, destPath);
-                    resolve({ path: destPath, sha256, totalSize: totalBytes });
-                } catch (err) {
-                    reject(err);
-                }
-            });
+        // pipe() writes with backpressure (a raw write() loop lets a fast
+        // network balloon memory against a slow disk); the 'data' listener
+        // above only observes chunks for progress reporting.
+        res.pipe(fileStream);
+
+        // Without this handler a disk-full/AV-lock write error is an
+        // unhandled 'error' event → uncaughtException in the main process,
+        // and the download promise would never settle.
+        fileStream.on('error', (err) => {
+            fail(new Error(`Disk write failed: ${err.message}`));
+        });
+
+        fileStream.on('finish', () => {
+            if (settled) return;
+            if (stallTimer) clearTimeout(stallTimer);
+            // Rename .partial to final path on success
+            try {
+                fs.renameSync(partialPath, destPath);
+                settled = true;
+                resolve({ path: destPath, totalSize: totalBytes });
+            } catch (err) {
+                settled = true;
+                reject(err);
+            }
         });
 
         res.on('error', (err) => {
-            fileStream.destroy();
             // Keep .partial file for resume — do NOT delete (differs from whisperCppDownloader)
-            reject(err);
+            fail(err);
+        });
+
+        // A destroyed/aborted socket emits 'close' without 'error' — convert
+        // an incomplete body into a failure so the retry loop can take over.
+        res.on('close', () => {
+            if (!settled && !res.complete) {
+                fail(new Error('Connection closed before download completed'));
+            }
         });
     });
 };
@@ -369,12 +474,18 @@ const validateDownload = async (destPath, expectedSize, expectedSha256 = null) =
 
 /**
  * Extract a zip only after checking every entry remains under destDir.
+ * Entry validation uses adm-zip's central directory (cheap — no inflation);
+ * the actual extraction runs in a child process via
+ * platformUtils.extractArchive (Expand-Archive on Windows, ditto on macOS —
+ * adm-zip's extractAllTo blocks the Electron main thread and is
+ * pathologically slow on huge entries, observed live 2026-07-02).
  *
  * @param {string} zipPath
  * @param {string} destDir
  * @param {{ requiredAnyBasenames?: string[] }} [options]
+ * @returns {Promise<void>}
  */
-const safeExtractZip = (zipPath, destDir, options = {}) => {
+const safeExtractZip = async (zipPath, destDir, options = {}) => {
     const AdmZip = require('adm-zip');
     const zip = new AdmZip(zipPath);
     const root = path.resolve(destDir);
@@ -406,7 +517,17 @@ const safeExtractZip = (zipPath, destDir, options = {}) => {
         throw new Error(`Zip ${path.basename(zipPath)} does not contain an expected binary.`);
     }
 
-    zip.extractAllTo(destDir, true);
+    await platformUtils.extractArchive(zipPath, destDir);
+};
+
+/**
+ * Extract a .tar.gz archive (macOS llama.cpp assets). tar.gz has no cheap
+ * central directory to pre-scan, but bsdtar refuses absolute paths and `..`
+ * traversal by default (no -P flag), so extraction itself is the safety
+ * boundary; callers verify the expected binary exists afterwards.
+ */
+const safeExtractTarGz = async (tarPath, destDir) => {
+    await platformUtils.extractArchive(tarPath, destDir);
 };
 
 // ─── Retry Logic ──────────────────────────────────────────────────────────────
@@ -430,12 +551,18 @@ const downloadWithRetry = async (url, destPath, onProgress, cancelToken, maxRetr
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        // A cancel can land between attempts (backoff sleep, or while a failing
+        // attempt is settling) — the persistent token flag is the only signal
+        // that survives, since each attempt re-wires token.cancel.
+        if (cancelToken?.cancelled) {
+            throw new Error('Download cancelled');
+        }
         try {
             return await downloadFile(url, destPath, onProgress, cancelToken);
         } catch (err) {
             // Do not retry on explicit cancel
-            if (err.message === 'Download cancelled') {
-                throw err;
+            if (err.message === 'Download cancelled' || cancelToken?.cancelled) {
+                throw new Error('Download cancelled');
             }
 
             lastError = err;
@@ -520,7 +647,12 @@ const getBinaryStatus = () => {
 const isBinaryCompatibleWithMode = (useCuda) => {
     const status = getBinaryStatus();
     if (!status.installed) return false;
+    // The version must match the pin in BOTH modes — checking it only for CUDA
+    // meant a PINNED_TAG bump upgraded CUDA installs but left CPU installs on
+    // the old build forever.
     if (status.version !== PINNED_TAG) return false;
+    // macOS has exactly one build (Metal) — GPU mode is irrelevant.
+    if (IS_MAC) return status.variant === 'metal';
     if (!useCuda) return true;
 
     return status.variant === 'cuda-12.4';
@@ -582,7 +714,7 @@ const checkPartialDownloads = () => {
 // ─── Model Download ───────────────────────────────────────────────────────────
 
 /**
- * Download a GGUF model from HuggingFace (bartowski quantized repos).
+ * Download a GGUF model from HuggingFace (unsloth quantized repos).
  *
  * Steps:
  *   1. Validate modelId is in MODELS registry
@@ -611,7 +743,7 @@ const downloadModel = async (modelId, onProgress, cancelToken) => {
 
     const destPath = path.join(modelsPath, model.filename);
 
-    // Skip if already downloaded (size within 5% tolerance — exact size from content-length)
+    // Skip if already downloaded (exact pinned size + checksum match)
     if (fs.existsSync(destPath)) {
         const existingSize = fs.statSync(destPath).size;
         if (existingSize === model.sizeApprox && (!model.sha256 || await hashFile(destPath, 'sha256') === model.sha256)) {
@@ -624,21 +756,13 @@ const downloadModel = async (modelId, onProgress, cancelToken) => {
     // Check disk space before starting download
     await ensureDiskSpace(model.sizeApprox, modelsPath);
 
-    // Track content-length total for validation after download
-    let trackedTotalSize = 0;
-
     const progressCallback = (progress) => {
-        if (progress.totalBytes > 0) {
-            trackedTotalSize = progress.totalBytes;
-        }
         if (onProgress) onProgress(progress);
         emitter.emit('progress', { type: 'model', modelId, ...progress });
     };
 
-    let downloadResult;
     try {
-        downloadResult = await downloadWithRetry(model.url, destPath, progressCallback, cancelToken);
-        trackedTotalSize = downloadResult.totalSize;
+        await downloadWithRetry(model.url, destPath, progressCallback, cancelToken);
     } catch (err) {
         emitter.emit('error', { type: 'model', modelId, error: err });
 
@@ -668,11 +792,11 @@ const downloadModel = async (modelId, onProgress, cancelToken) => {
         throw err;
     }
 
-    // Validate downloaded file against HTTP content-length
-    let validation = { sha256: downloadResult.sha256, size: downloadResult.totalSize };
-    if (trackedTotalSize > 0) {
-        validation = await validateDownload(destPath, trackedTotalSize, model.sha256);
-    }
+    // Validate against the registry's pinned size + sha256 (exact values) rather
+    // than the HTTP content-length: some proxies strip content-length, and a
+    // resumed download's streaming hash covers only the appended bytes — the
+    // pinned values are the only trustworthy reference either way.
+    const validation = await validateDownload(destPath, model.sizeApprox, model.sha256);
 
     // Write manifest with full metadata
     updateManifest('model', modelId, {
@@ -698,7 +822,8 @@ const downloadModel = async (modelId, onProgress, cancelToken) => {
  */
 const findBinary = () => {
     const base = getBasePath();
-    const subdirs = ['', 'bin', 'build/bin'];
+    // The macOS tarball nests everything under a llama-<tag>/ directory.
+    const subdirs = ['', 'bin', 'build/bin', `llama-${PINNED_TAG}`];
 
     for (const subdir of subdirs) {
         const candidate = subdir
@@ -714,7 +839,7 @@ const findBinary = () => {
 // ─── Binary Download ──────────────────────────────────────────────────────────
 
 /**
- * Download and extract llama-server from the pinned b8198 release.
+ * Download and extract llama-server from the pinned release (PINNED_TAG).
  *
  * CUDA path (useCuda === true): downloads two ZIPs — main binary zip + cudart runtime zip.
  * Both are extracted to the same directory so DLLs are co-located with llama-server.exe.
@@ -735,10 +860,17 @@ const findBinary = () => {
  * @param {{ cancel: function|null }} [cancelToken] - set cancelToken.cancel to abort
  * @returns {Promise<{ success: boolean, binaryPath: string, tag: string, variant: string }>}
  */
-const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
+const downloadBinaryInternal = async (onProgress, useCuda = true, cancelToken) => {
+    // A cancel may have landed while this run was queued on the serialization
+    // chain — honor it before doing any work.
+    if (cancelToken?.cancelled) {
+        throw new Error('Download cancelled');
+    }
     const basePath = getBasePath();
     fs.mkdirSync(basePath, { recursive: true });
-    const requestedVariant = useCuda ? 'cuda-12.4' : 'cpu';
+    // macOS: single Metal build — CUDA never applies regardless of settings.
+    if (IS_MAC) useCuda = false;
+    const requestedVariant = IS_MAC ? 'metal' : (useCuda ? 'cuda-12.4' : 'cpu');
 
     // Check if the correct version AND runtime variant are already installed.
     const manifestPath = path.join(basePath, 'manifest.json');
@@ -759,8 +891,10 @@ const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
         } catch (_) { /* corrupt manifest, proceed with download */ }
     }
 
-    // Check disk space before download
-    const binarySizeEstimate = useCuda ? 250 * 1024 * 1024 : 50 * 1024 * 1024;
+    // Check disk space before download. CUDA needs the two zips (220MB + 391MB)
+    // plus the extracted payload coexisting transiently — ~1.3GB peak, not 250MB.
+    // macOS tarball is ~11MB compressed; 100MB covers archive + payload.
+    const binarySizeEstimate = useCuda ? 1300 * 1024 * 1024 : 100 * 1024 * 1024;
     await ensureDiskSpace(binarySizeEstimate, basePath);
 
     // ── Step 1: Fetch pinned release metadata ────────────────────────────────
@@ -819,37 +953,59 @@ const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
         emitter.emit('progress', { type: 'binary', ...progressData });
     };
 
-    if (useCuda) {
+    // Download an asset zip unless a fully-validated copy is already on disk
+    // (e.g. a previous attempt downloaded it but crashed/stalled before
+    // extraction — re-downloading hundreds of MB on slow links is wasteful).
+    const fetchAssetZip = async (asset, zipPath, stage) => {
+        if (fs.existsSync(zipPath)) {
+            try {
+                const existing = await validateDownload(zipPath, asset.size, asset.sha256);
+                console.log(`[llamaDownloader] Reusing already-downloaded ${asset.name}`);
+                return existing;
+            } catch (_) {
+                // validateDownload deleted the mismatching file — fall through
+            }
+        }
+        progressWrap(stage, { percent: 0 });
+        await downloadFile(asset.url, zipPath, (p) => {
+            progressWrap(stage, p);
+        }, cancelToken);
+        return validateDownload(zipPath, asset.size, asset.sha256);
+    };
+
+    if (IS_MAC) {
+        // ── Step 2 (macOS): single Metal tarball ─────────────────────────────
+        console.log(`[llamaDownloader] macOS path: downloading ${MAC_ASSET}...`);
+        const macAsset = findAsset(MAC_ASSET);
+        const macTarPath = path.join(basePath, MAC_ASSET);
+        installedAssets[macAsset.name] = await fetchAssetZip(macAsset, macTarPath, 'downloading-binary');
+
+        progressWrap('extracting', { percent: 0 });
+        console.log('[llamaDownloader] Extracting macOS tarball...');
+        await safeExtractTarGz(macTarPath, basePath);
+        try { fs.unlinkSync(macTarPath); } catch (_) {}
+
+    } else if (useCuda) {
         // ── Step 2a: CUDA path — download main binary zip ────────────────────
         console.log(`[llamaDownloader] CUDA path: downloading ${CUDA_MAIN_ASSET}...`);
         const mainAsset = findAsset(CUDA_MAIN_ASSET);
         const mainZipPath = path.join(basePath, CUDA_MAIN_ASSET);
-
-        progressWrap('downloading-binary', { percent: 0 });
-        await downloadFile(mainAsset.url, mainZipPath, (p) => {
-            progressWrap('downloading-binary', p);
-        }, cancelToken);
-        installedAssets[mainAsset.name] = await validateDownload(mainZipPath, mainAsset.size, mainAsset.sha256);
+        installedAssets[mainAsset.name] = await fetchAssetZip(mainAsset, mainZipPath, 'downloading-binary');
 
         // ── Step 2b: CUDA path — download cudart runtime zip ─────────────────
         console.log(`[llamaDownloader] CUDA path: downloading ${CUDA_RT_ASSET}...`);
         const cudartAsset = findAsset(CUDA_RT_ASSET);
         const cudartZipPath = path.join(basePath, CUDA_RT_ASSET);
-
-        progressWrap('downloading-cudart', { percent: 0 });
-        await downloadFile(cudartAsset.url, cudartZipPath, (p) => {
-            progressWrap('downloading-cudart', p);
-        }, cancelToken);
-        installedAssets[cudartAsset.name] = await validateDownload(cudartZipPath, cudartAsset.size, cudartAsset.sha256);
+        installedAssets[cudartAsset.name] = await fetchAssetZip(cudartAsset, cudartZipPath, 'downloading-cudart');
 
         // ── Step 2c: Extract both ZIPs to the same directory ─────────────────
         progressWrap('extracting', { percent: 0 });
         console.log('[llamaDownloader] Extracting CUDA binary zip...');
-        safeExtractZip(mainZipPath, basePath, { requiredAnyBasenames: [LLAMA_BINARY_NAME] });
+        await safeExtractZip(mainZipPath, basePath, { requiredAnyBasenames: [LLAMA_BINARY_NAME] });
         try { fs.unlinkSync(mainZipPath); } catch (_) {}
 
         console.log('[llamaDownloader] Extracting cudart zip...');
-        safeExtractZip(cudartZipPath, basePath);
+        await safeExtractZip(cudartZipPath, basePath);
         try { fs.unlinkSync(cudartZipPath); } catch (_) {}
 
     } else {
@@ -857,17 +1013,12 @@ const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
         console.log(`[llamaDownloader] CPU path: downloading ${CPU_ASSET}...`);
         const cpuAsset = findAsset(CPU_ASSET);
         const cpuZipPath = path.join(basePath, CPU_ASSET);
-
-        progressWrap('downloading-binary', { percent: 0 });
-        await downloadFile(cpuAsset.url, cpuZipPath, (p) => {
-            progressWrap('downloading-binary', p);
-        }, cancelToken);
-        installedAssets[cpuAsset.name] = await validateDownload(cpuZipPath, cpuAsset.size, cpuAsset.sha256);
+        installedAssets[cpuAsset.name] = await fetchAssetZip(cpuAsset, cpuZipPath, 'downloading-binary');
 
         // Extract
         progressWrap('extracting', { percent: 0 });
         console.log('[llamaDownloader] Extracting CPU binary zip...');
-        safeExtractZip(cpuZipPath, basePath, { requiredAnyBasenames: [LLAMA_BINARY_NAME] });
+        await safeExtractZip(cpuZipPath, basePath, { requiredAnyBasenames: [LLAMA_BINARY_NAME] });
         try { fs.unlinkSync(cpuZipPath); } catch (_) {}
     }
 
@@ -878,6 +1029,12 @@ const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
             `Extraction succeeded but ${LLAMA_BINARY_NAME} not found in ${basePath}. ` +
             `Check the zip contents and extraction path.`
         );
+    }
+
+    // Belt-and-braces on macOS: tar normally preserves the execute bit, but a
+    // stripped mode would make spawn() fail with EACCES.
+    if (IS_MAC) {
+        try { fs.chmodSync(binaryPath, 0o755); } catch (_) {}
     }
 
     // ── Step 5: Write binary manifest entry ──────────────────────────────────
@@ -900,6 +1057,20 @@ const downloadBinary = async (onProgress, useCuda = true, cancelToken) => {
         tag: PINNED_TAG,
         variant: cudaVariant,
     };
+};
+
+// Serialize concurrent downloadBinary calls. main.cjs reaches this from several
+// independent paths (startup ensure, transcription-complete, settings, model
+// downloads); two interleaved runs would write the same .partial zip with mixed
+// 'w'/'a' flags and corrupt each other's download.
+let _binaryDownloadChain = Promise.resolve();
+
+const downloadBinary = (onProgress, useCuda = true, cancelToken) => {
+    const run = _binaryDownloadChain
+        .catch(() => {}) // a failed predecessor must not poison the chain
+        .then(() => downloadBinaryInternal(onProgress, useCuda, cancelToken));
+    _binaryDownloadChain = run;
+    return run;
 };
 
 // ─── Exports ──────────────────────────────────────────────────────────────────

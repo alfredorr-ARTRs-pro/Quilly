@@ -161,26 +161,56 @@ const transcribe = async (audioData, options = {}) => {
         const modelId = normalizeModelId(options.modelId || DEFAULT_MODEL);
         console.log(`Starting transcription, model: ${modelId}`);
 
-        if (!cppDisabledForSession && !whisperCpp.isAvailable(modelId)) {
+        // Parakeet is a distinct engine (parakeet-cli): it neither counts toward
+        // nor honors the whisper-cli failure breaker — three parakeet failures
+        // must not silently degrade every Whisper model to the slow
+        // Transformers.js path (and vice versa).
+        const usesParakeet = whisperCpp.isParakeetModel?.(modelId) === true;
+        const cppAllowed = usesParakeet || !cppDisabledForSession;
+
+        if (cppAllowed && !whisperCpp.isAvailable(modelId)) {
             await ensureWhisperCppModel(modelId, options.onProgress);
         }
 
         // Try whisper.cpp first (native CUDA on Windows)
-        if (!cppDisabledForSession && whisperCpp.isAvailable(modelId)) {
+        if (cppAllowed && whisperCpp.isAvailable(modelId)) {
             try {
                 console.log('Routing to whisper.cpp (CUDA)...');
                 const result = await whisperCpp.transcribe(audioData, { ...options, modelId });
-                cppFailCount = 0; // Reset on success
+                if (!usesParakeet) cppFailCount = 0; // Reset on success
                 return result;
             } catch (cppError) {
-                cppFailCount++;
-                console.warn(`whisper.cpp failed (${cppFailCount}/${MAX_CPP_FAILURES}):`, cppError.message);
-                if (cppFailCount >= MAX_CPP_FAILURES) {
-                    console.warn('whisper.cpp disabled for this session after repeated failures');
-                    cppDisabledForSession = true;
+                if (usesParakeet) {
+                    console.warn('parakeet-cli failed:', cppError.message);
+                } else {
+                    cppFailCount++;
+                    console.warn(`whisper.cpp failed (${cppFailCount}/${MAX_CPP_FAILURES}):`, cppError.message);
+                    if (cppFailCount >= MAX_CPP_FAILURES) {
+                        console.warn('whisper.cpp disabled for this session after repeated failures');
+                        cppDisabledForSession = true;
+                    }
+                    console.log('Falling back to Transformers.js CPU...');
                 }
-                console.log('Falling back to Transformers.js CPU...');
             }
+        }
+
+        // Parakeet has no Transformers.js fallback (no compatible hub model) —
+        // surface a clear error instead of letting the hub 404.
+        if (usesParakeet) {
+            const installed = whisperCpp.isAvailable(modelId);
+            return {
+                success: false,
+                error: installed
+                    ? 'Parakeet transcription failed. Try again, or switch to a Whisper model.'
+                    : 'Parakeet engine not installed. Open Settings → GPU Backend and run setup again to update whisper.cpp, or switch to a Whisper model.',
+            };
+        }
+
+        // Cancel any preload idle-dispose timer: if it fired mid-inference it
+        // would dispose the model out from under the running transcription.
+        if (idleTimer) {
+            clearTimeout(idleTimer);
+            idleTimer = null;
         }
 
         // Transformers.js path (CPU on Windows, CUDA on Linux)

@@ -13,12 +13,14 @@
 //
 // Internal API (exposed via _internal for testing):
 //   buildUserContent(speechContent, clipboardText, intent) → { text, wasTruncated }
-//   sanitizeOutput(llmOutput, fallbackText) → string
+//   sanitizeOutput(llmOutput, fallbackText, systemPrompt?) → string
 
 const whisperCppService = require('./whisperCppService.cjs');
 const intentRouter = require('./intentRouter.cjs');
 const llamaService = require('./llamaService.cjs');
 const { PROMPT_TEMPLATES } = require('./promptTemplates.cjs');
+const { renderPromptTemplate } = require('./promptConfig.cjs');
+const { stripThinkBlocks } = require('./textUtils.cjs');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -97,24 +99,35 @@ const buildUserContent = (speechContent, clipboardText, intent) => {
  * @param {string} fallbackText
  * @returns {string}
  */
-const sanitizeOutput = (llmOutput, fallbackText) => {
+const sanitizeOutput = (llmOutput, fallbackText, systemPrompt = null) => {
     // Check 0: null / undefined / empty
     if (llmOutput == null) {
         console.warn('[sanitize] LLM output is null/undefined — using fallback');
         return fallbackText;
     }
 
-    // Strip Qwen 3.5 thinking blocks — model may produce <think>...</think> reasoning
-    const stripped = String(llmOutput).replace(/<think>[\s\S]*?<\/think>/g, '');
-    const trimmed = stripped.trim();
+    // Strip Qwen reasoning (shared helper — handles balanced, close-only,
+    // unclosed, and nested <think> shapes; see textUtils.cjs).
+    const trimmed = stripThinkBlocks(llmOutput);
     if (trimmed.length === 0) {
         console.warn('[sanitize] LLM output empty after stripping <think> blocks — using fallback');
         return fallbackText;
     }
 
-    // Check 2: system prompt echo detection (case-insensitive)
-    const lower = trimmed.toLowerCase();
-    if (lower.startsWith('you are ') || lower.startsWith('system:')) {
+    // Check 2: system prompt echo detection (case-insensitive). When the actual
+    // system prompt is available, compare against its real prefix — the generic
+    // "you are " test false-positives on legitimate output such as a translation
+    // that begins "You are invited to the ceremony." Whitespace is collapsed on
+    // both sides and the prefix kept short (24 chars) so an echo that reflows
+    // the prompt's line breaks or diverges after the first sentence is still
+    // caught.
+    const collapse = (s) => String(s).toLowerCase().replace(/\s+/g, ' ').trim();
+    const lower = collapse(trimmed);
+    const promptPrefix = systemPrompt ? collapse(systemPrompt).slice(0, 24) : null;
+    const isEcho = promptPrefix && promptPrefix.length >= 12
+        ? (lower.startsWith(promptPrefix) || lower.startsWith('system:'))
+        : (lower.startsWith('you are ') || lower.startsWith('system:'));
+    if (isEcho) {
         console.warn('[sanitize] LLM echoed system prompt — using fallback');
         return fallbackText;
     }
@@ -186,18 +199,31 @@ const stripPreamble = (text) => {
 const _runLlmPipeline = async (routeResult, rawText, clipboardText, options, usedWhisperTranslate = false) => {
     // Step 5: Look up prompt template for this intent
     const template = PROMPT_TEMPLATES[routeResult.intent] || PROMPT_TEMPLATES.rewrite;
+    const promptOverride = options.developerPromptConfig?.llmPrompts?.[routeResult.intent];
 
     // Step 6: Compute system prompt — factory function or direct string
     let systemPrompt =
         typeof template.systemPrompt === 'function'
             ? template.systemPrompt(routeResult.targetLanguage)
             : template.systemPrompt;
+    let temperature = template.temperature;
+
+    const usingDeveloperPrompt = options.developerPromptConfig?.enabled && promptOverride?.enabled && promptOverride.systemPrompt;
+    if (usingDeveloperPrompt) {
+        systemPrompt = renderPromptTemplate(promptOverride.systemPrompt, {
+            targetLanguage: routeResult.targetLanguage || '',
+            intent: routeResult.intent,
+        });
+        if (Number.isFinite(Number(promptOverride.temperature))) {
+            temperature = Number(promptOverride.temperature);
+        }
+    }
 
     // Step 6a: For non-translate intents, instruct the LLM to respond in the input's language.
     // Must be emphatic — small models (Qwen 3.5-4B/9B) default to English when the system
     // prompt is entirely in English unless the language constraint is very explicit.
     if (routeResult.intent !== 'translate') {
-        systemPrompt += '\n\nIMPORTANT: You MUST respond in the same language as the input text. If the input is in Spanish, respond in Spanish. If the input is in French, respond in French. Do NOT translate to English unless the input is already in English.';
+        systemPrompt += '\n\nIMPORTANT: Write your reply in the same language the user SPOKE (the spoken content). Clipboard content may be in a different language - do NOT switch to the language of the clipboard; only its meaning matters. Translate only when the instruction explicitly asks for a translation.';
     }
 
     // Step 6c: Editor freeform override — when instruction is explicitly separated,
@@ -212,7 +238,16 @@ const _runLlmPipeline = async (routeResult, rawText, clipboardText, options, use
             + '3. Do NOT repeat the instruction, add explanations, or add commentary.\n'
             + '4. Do NOT say you cannot detect an instruction — the INSTRUCTION above IS the instruction.';
         // Re-apply language preservation for non-translate freeform
-        systemPrompt += '\n\nIMPORTANT: You MUST respond in the same language as the input text. If the input is in Spanish, respond in Spanish. If the input is in French, respond in French. Do NOT translate to English unless the input is already in English.';
+        systemPrompt += '\n\nIMPORTANT: Write your reply in the same language the user SPOKE (the spoken content). Clipboard content may be in a different language - do NOT switch to the language of the clipboard; only its meaning matters. Translate only when the instruction explicitly asks for a translation.';
+    }
+
+    if (options.editorInstruction && routeResult.intent === 'freeform' && usingDeveloperPrompt) {
+        systemPrompt = renderPromptTemplate(promptOverride.systemPrompt, {
+            targetLanguage: routeResult.targetLanguage || '',
+            intent: routeResult.intent,
+        });
+        systemPrompt += '\n\nIMPORTANT: Write your reply in the same language the user SPOKE (the spoken content). Clipboard content may be in a different language - do NOT switch to the language of the clipboard; only its meaning matters. Translate only when the instruction explicitly asks for a translation.';
+        systemPrompt += `\n\nINSTRUCTION: ${options.editorInstruction}\n\nDASHBOARD RULES:\n1. Apply the INSTRUCTION to the CONTENT provided by the user.\n2. Output ONLY the processed result.\n3. Do NOT repeat the instruction, add explanations, or add commentary.\n4. Do NOT say you cannot detect an instruction - the INSTRUCTION above IS the instruction.`;
     }
 
     // Step 6b: Append the user's full spoken transcription to the system prompt.
@@ -225,7 +260,9 @@ const _runLlmPipeline = async (routeResult, rawText, clipboardText, options, use
         systemPrompt += `\n\nThe user's full spoken command was: "${rawText}". If this command suggests a different intent than the one described above, prioritize what the user actually asked for.`;
     }
 
-    const temperature = template.temperature;
+    if (options.liveDraftReference) {
+        systemPrompt += `\n\nA live cleaned draft was shown while the user spoke: "${options.liveDraftReference}". Use it only as a spelling and cleanup reference. The raw spoken command/content remains the source of truth for instructions and intent; do not infer missing instructions from the cleaned draft.`;
+    }
 
     // Step 7: Build user content — combine speech and clipboard
     const { text: userContent, wasTruncated } = buildUserContent(
@@ -251,8 +288,13 @@ const _runLlmPipeline = async (routeResult, rawText, clipboardText, options, use
 
     let timeoutId = null;
     try {
+        const inferPromise = llamaService.infer(routeResult.intent, messages, temperature);
+        // If the timeout wins the race, the orphaned infer promise can still
+        // reject minutes later (failed respawn retry) — without a handler that
+        // becomes an unhandled rejection in the Electron main process.
+        inferPromise.catch(() => {});
         llmOutput = await Promise.race([
-            llamaService.infer(routeResult.intent, messages, temperature),
+            inferPromise,
             new Promise((_, reject) =>
                 timeoutId = setTimeout(
                     () => reject(new Error('PIPELINE_TIMEOUT')),
@@ -274,8 +316,9 @@ const _runLlmPipeline = async (routeResult, rawText, clipboardText, options, use
         }
     }
 
-    // Step 10: Sanitize LLM output
-    const sanitized = sanitizeOutput(llmOutput, rawText);
+    // Step 10: Sanitize LLM output (pass the system prompt so echo detection
+    // compares against what was actually sent instead of a generic prefix)
+    const sanitized = sanitizeOutput(llmOutput, rawText, systemPrompt);
 
     // Step 11: Append truncation notice if clipboard was truncated
     let finalOutput = sanitized;
@@ -342,11 +385,14 @@ const processRecording = async (audioData, clipboardText = null, options = {}) =
         };
     }
 
-    // Step 4: PROC-06 — translate to English without clipboard uses Whisper's native translation
+    // Step 4: PROC-06 — translate to English without clipboard uses Whisper's native
+    // translation. Parakeet has no --translate mode, so those models fall through to
+    // LLM translation instead of hard-failing inside translateToEnglish.
     if (
         routeResult.intent === 'translate' &&
         routeResult.targetLanguage === 'English' &&
-        !clipboardText
+        !clipboardText &&
+        !whisperCppService.isParakeetModel?.(options.modelId)
     ) {
         if (typeof whisperCppService.translateToEnglish === 'function') {
             const translatedResult = await whisperCppService.translateToEnglish(audioData, whisperOptions);

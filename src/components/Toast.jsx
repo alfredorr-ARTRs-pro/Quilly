@@ -7,6 +7,11 @@ function ToastItem({ id, message, type, onRemove }) {
     const [isExiting, setIsExiting] = useState(false);
 
     useEffect(() => {
+        // Loading toasts represent in-flight work (transcription can take much
+        // longer than 3s) — they stay until explicitly updated or removed.
+        // Auto-expiring them makes every later toast.update() a silent no-op.
+        if (type === 'loading') return undefined;
+
         const timer = setTimeout(() => {
             setIsExiting(true);
             setTimeout(() => onRemove(id), 300); // Wait for exit animation

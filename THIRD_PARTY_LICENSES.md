@@ -6,14 +6,18 @@ Quilly is built on a foundation of excellent open-source software. This document
 
 | Project | License | Purpose |
 |---|---|---|
-| **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** by Georgi Gerganov | [MIT](https://github.com/ggerganov/whisper.cpp/blob/master/LICENSE) | Speech-to-text inference engine (bundled binary) |
-| **[llama.cpp](https://github.com/ggerganov/llama.cpp)** by Georgi Gerganov | [MIT](https://github.com/ggerganov/llama.cpp/blob/master/LICENSE) | Language-model inference engine (bundled as `llama-server`) |
+| **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** by Georgi Gerganov / ggml-org | [MIT](https://github.com/ggml-org/whisper.cpp/blob/master/LICENSE) | Speech-to-text inference engine, incl. `parakeet-cli` (downloaded on first use) |
+| **[llama.cpp](https://github.com/ggml-org/llama.cpp)** by Georgi Gerganov / ggml-org | [MIT](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) | Language-model inference engine, `llama-server` (downloaded on first use) |
+| **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** by k2-fsa | [Apache 2.0](https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE) | Speaker diarization engine (downloaded on first use) |
 | **[Whisper](https://github.com/openai/whisper)** by OpenAI | [MIT](https://github.com/openai/whisper/blob/main/LICENSE) | Speech recognition model weights (downloaded on first use) |
+| **[Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)** by NVIDIA | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) | Speech recognition model weights, GGML conversion by [ggml-org](https://huggingface.co/ggml-org/parakeet-GGUF) (downloaded on first use) |
 | **[Qwen](https://github.com/QwenLM/Qwen)** by Alibaba Cloud | [Apache 2.0](https://github.com/QwenLM/Qwen/blob/main/LICENSE) | Language model weights (downloaded on first use) |
+| **[pyannote segmentation 3.0](https://huggingface.co/pyannote/segmentation-3.0)** by pyannote | [MIT](https://github.com/pyannote/pyannote-audio/blob/develop/LICENSE) | Speaker segmentation model, ONNX export via sherpa-onnx (downloaded on first use) |
+| **[TitaNet-S](https://catalog.ngc.nvidia.com/orgs/nvidia/nemo/models/titanet_small)** by NVIDIA | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) | Speaker embedding model, ONNX export via sherpa-onnx (downloaded on first use) |
 
 ### Model weight redistribution
 
-Quilly does **not** bundle the Whisper or Qwen model weights in its installer. They are downloaded on first use from their official repositories (HuggingFace). Users retain full responsibility for compliance with the respective model licenses when using those weights.
+Quilly does **not** bundle any model weights or engine programs in its installer. They are downloaded on first use from their official sources (Hugging Face and GitHub). Users retain full responsibility for compliance with the respective licenses when using them. Parakeet and TitaNet are © NVIDIA Corporation, used under CC-BY-4.0 in the converted formats linked above; Quilly does not modify them further.
 
 ## Application framework
 

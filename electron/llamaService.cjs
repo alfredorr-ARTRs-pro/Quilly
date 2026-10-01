@@ -8,7 +8,7 @@
 // Public API:
 //   infer(intent, messages, temperature) — route intent, ensure correct model loaded, run inference
 //   spawn(modelPath, port, nGpuLayers)   — spawn llama-server (also used internally by ensureServer)
-//   kill()                               — force-kill via taskkill and confirm death
+//   kill()                               — force-kill via platform layer and confirm death
 //   isRunning()                          — true if child process reference is held
 //   events                               — EventEmitter: 'spawning', 'ready', 'error', 'killed', 'cpu-fallback'
 //   cleanupZombie()                      — kill stale PID from previous crash at startup
@@ -18,13 +18,14 @@
 //   pollHealth, postInference, isPidAlive, waitForDeath, writePid, deletePid,
 //   selectModel, ensureServer, enqueue, ensureWhisperUnloaded, getNGpuLayers, cleanupZombie
 
-const { spawn: nodeSpawn, execFile } = require('child_process');
+const { spawn: nodeSpawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 const { EventEmitter } = require('events');
 const llamaDownloader = require('./llamaDownloader.cjs');
+const platformUtils = require('./platformUtils.cjs');
 
 // ─── Module State ─────────────────────────────────────────────────────────────
 
@@ -48,6 +49,24 @@ let _isCpuFallback = false;
 
 /** Fixed port for llama-server */
 const PORT = 8787;
+
+/**
+ * Socket inactivity timeout for inference requests. Non-streaming completions
+ * send nothing until generation finishes, so this must exceed the slowest
+ * legitimate CPU generation — it exists to free the serialized infer queue
+ * when the server is truly hung, after the callers' own 120s timeouts fire.
+ */
+const INFERENCE_SOCKET_TIMEOUT_MS = 180_000;
+
+/**
+ * Health-check deadline for a freshly spawned server. A cold load of the
+ * 5.7GB 9B model into a laptop GPU takes well over 30s (disk read + VRAM
+ * upload + CUDA init) — a 30s deadline killed a healthy-but-loading server,
+ * observed live 2026-07-02 ("llama-server health timeout" on an RTX 4060).
+ * A crashed server still fails fast: waitForHealthOrExit rejects the moment
+ * the process exits.
+ */
+const HEALTH_TIMEOUT_MS = 180_000;
 
 /** Module-level EventEmitter for lifecycle events */
 const events = new EventEmitter();
@@ -77,15 +96,26 @@ const writePid = (pid) => {
 
 /**
  * Delete the PID file.
- * Swallows ENOENT — safe to call even if file was never created.
+ * Never throws: this runs inside process event handlers ('close'), where a
+ * transient EPERM (e.g. antivirus briefly locking the file) would otherwise
+ * escalate to an uncaughtException and crash the main process. A leftover PID
+ * file is harmless — cleanupZombie() handles it on next startup.
+ *
+ * @param {number} [ownerPid] - only delete if the file still records this PID.
+ *   Guards a kill-then-respawn race: the old process's late 'close' handler
+ *   must not delete the PID file the new spawn just wrote.
  */
-const deletePid = () => {
+const deletePid = (ownerPid = null) => {
     const pidFile = getPidFilePath();
     try {
+        if (ownerPid != null) {
+            const recorded = fs.readFileSync(pidFile, 'utf8').trim();
+            if (recorded && recorded !== String(ownerPid)) return;
+        }
         fs.unlinkSync(pidFile);
     } catch (err) {
         if (err.code !== 'ENOENT') {
-            throw err;
+            console.warn(`[llamaService] Could not delete PID file (non-fatal): ${err.message}`);
         }
     }
 };
@@ -93,32 +123,13 @@ const deletePid = () => {
 // ─── Process Status Helpers ───────────────────────────────────────────────────
 
 /**
- * Check if a PID is alive using tasklist (Windows built-in).
- * Uses execFile (not exec) to avoid shell injection.
+ * Check if a PID is alive — tasklist on Windows, signal-0 probe on POSIX.
+ * Delegates to the platform layer so this file stays OS-agnostic.
  *
  * @param {number} pid
  * @returns {Promise<boolean>} true if process is running, false otherwise
  */
-const isPidAlive = (pid) =>
-    new Promise((resolve) => {
-        if (!pid || pid <= 0) {
-            resolve(false);
-            return;
-        }
-        execFile(
-            'tasklist',
-            ['/FI', `PID eq ${pid}`, '/NH'],
-            { windowsHide: true },
-            (err, stdout) => {
-                if (err) {
-                    resolve(false);
-                    return;
-                }
-                // tasklist output includes the PID string if the process is alive
-                resolve(stdout.includes(String(pid)));
-            }
-        );
-    });
+const isPidAlive = (pid) => platformUtils.isPidAlive(pid);
 
 /**
  * Poll tasklist until the PID is confirmed dead, or timeout expires.
@@ -306,9 +317,13 @@ const waitForHealthOrExit = (proc, port, timeoutMs = 30000, intervalMs = 300) =>
  * @param {number} temperature
  * @returns {Promise<string>}
  */
-const postInference = (port, messages, temperature) =>
+const postInference = (port, messages, temperature, maxTokens = null) =>
     new Promise((resolve, reject) => {
-        const bodyStr = JSON.stringify({ messages, temperature, stream: false });
+        const body = { messages, temperature, stream: false };
+        if (Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0) {
+            body.max_tokens = Math.floor(Number(maxTokens));
+        }
+        const bodyStr = JSON.stringify(body);
         const options = {
             hostname: 'localhost',
             port,
@@ -324,6 +339,12 @@ const postInference = (port, messages, temperature) =>
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
             res.on('end', () => {
+                // Surface server-side errors (400/500 with a JSON error body)
+                // instead of the misleading "missing choices[0].message".
+                if (res.statusCode !== 200) {
+                    reject(new Error(`Inference returned status ${res.statusCode}: ${data.slice(0, 300)}`));
+                    return;
+                }
                 let parsed;
                 try {
                     parsed = JSON.parse(data);
@@ -350,8 +371,121 @@ const postInference = (port, messages, temperature) =>
             });
         });
 
+        // A hung llama-server would otherwise leave this promise pending forever,
+        // wedging the serialized infer queue for the rest of the session — the
+        // caller's Promise.race timeout does not release the queue slot.
+        req.setTimeout(INFERENCE_SOCKET_TIMEOUT_MS, () => {
+            req.destroy(new Error(`Inference request timed out after ${INFERENCE_SOCKET_TIMEOUT_MS / 1000}s of socket inactivity`));
+        });
+
         req.on('error', (err) => {
             reject(new Error(`Inference request failed: ${err.message}`));
+        });
+
+        req.write(bodyStr);
+        req.end();
+    });
+
+/**
+ * Streaming variant of postInference. Uses SSE (`stream: true`) and invokes
+ * `onChunk(deltaText)` for every delta as it arrives. Resolves with the full
+ * accumulated content string when the server emits `[DONE]` or closes.
+ *
+ * @param {number} port
+ * @param {Array<{role: string, content: string}>} messages
+ * @param {number} temperature
+ * @param {number|null} maxTokens
+ * @param {(delta: string) => void} onChunk
+ * @returns {Promise<string>}
+ */
+const postInferenceStreaming = (port, messages, temperature, maxTokens, onChunk) =>
+    new Promise((resolve, reject) => {
+        const body = { messages, temperature, stream: true };
+        if (Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0) {
+            body.max_tokens = Math.floor(Number(maxTokens));
+        }
+        const bodyStr = JSON.stringify(body);
+        const options = {
+            hostname: 'localhost',
+            port,
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
+                'Content-Length': Buffer.byteLength(bodyStr),
+            },
+        };
+
+        const req = http.request(options, (res) => {
+            if (res.statusCode !== 200) {
+                reject(new Error(`Streaming inference returned status ${res.statusCode}`));
+                res.resume();
+                return;
+            }
+
+            let buffer = '';
+            let accumulated = '';
+            let done = false;
+
+            res.setEncoding('utf8');
+            res.on('data', (chunk) => {
+                buffer += chunk;
+                let newlineIndex;
+                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.slice(0, newlineIndex).trimEnd();
+                    buffer = buffer.slice(newlineIndex + 1);
+                    if (!line || !line.startsWith('data:')) continue;
+
+                    const payload = line.slice(5).trim();
+                    if (!payload) continue;
+                    if (payload === '[DONE]') {
+                        done = true;
+                        continue;
+                    }
+
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(payload);
+                    } catch (_) {
+                        continue;
+                    }
+
+                    const delta = parsed?.choices?.[0]?.delta?.content
+                        || parsed?.choices?.[0]?.message?.content
+                        || '';
+                    if (delta) {
+                        accumulated += delta;
+                        try {
+                            if (typeof onChunk === 'function') onChunk(delta);
+                        } catch (_) {
+                            // Listener errors must not break the stream.
+                        }
+                    }
+                }
+            });
+
+            res.on('end', () => {
+                if (!done && !accumulated) {
+                    reject(new Error('Streaming inference ended without content'));
+                    return;
+                }
+                resolve(accumulated);
+            });
+
+            res.on('error', (err) => {
+                reject(new Error(`Streaming inference response error: ${err.message}`));
+            });
+        });
+
+        // Streaming sends tokens continuously — prolonged silence means the
+        // server is hung; free the queue slot instead of waiting forever.
+        req.setTimeout(INFERENCE_SOCKET_TIMEOUT_MS, () => {
+            req.destroy(new Error(`Streaming inference timed out after ${INFERENCE_SOCKET_TIMEOUT_MS / 1000}s of socket inactivity`));
+        });
+
+        req.on('error', (err) => {
+            reject(new Error(`Streaming inference request failed: ${err.message}`));
         });
 
         req.write(bodyStr);
@@ -384,17 +518,10 @@ const killServer = async () => {
     _currentModel = null;
 
     try {
-        // taskkill /F /PID — force kill, ignore exit code (process may already be dead)
-        await new Promise((resolve) => {
-            execFile(
-                'taskkill',
-                ['/F', '/PID', String(pid)],
-                { windowsHide: true },
-                () => resolve()  // always resolve — exit 1 means "already dead"
-            );
-        });
+        // Force kill — platform layer ignores "already dead" on both OSes
+        await platformUtils.killPid(pid);
 
-        // Poll until PID is confirmed absent from tasklist
+        // Poll until the PID is confirmed gone
         await waitForDeath(pid, 10000, 200);
     } catch (killErr) {
         console.error(`[llamaService] Warning: kill confirmation failed: ${killErr.message}`);
@@ -469,7 +596,25 @@ const spawnServer = (modelPath, port = PORT, nGpuLayers = 999) => {
         '--n-gpu-layers', String(nGpuLayers),
         '--ctx-size', '4096',
         '--parallel', '1',
+        // Disable thinking entirely. Verified empirically on b9859 + Qwen3.5-4B
+        // (2026-07-02): by default the chat template enables reasoning and the
+        // server routes it to message.reasoning_content — a capped completion
+        // burns its whole token budget thinking and returns EMPTY content
+        // (85s → nothing). With '--reasoning off' the same request answers
+        // correctly in ~3s. ('--reasoning-budget 0' does NOT stop it.)
+        // Requires the pinned b9859+ binary — enforced by
+        // llamaDownloader.isBinaryCompatibleWithMode's version check.
+        '--reasoning', 'off',
     ];
+
+    // Per-model server flags from the registry (e.g. the 35B MoE model keeps
+    // its expert weights on CPU via --n-cpu-moe so consumer GPUs can run it).
+    const modelFilename = path.basename(modelPath);
+    const registryEntry = Object.values(llamaDownloader.MODELS)
+        .find(m => m.filename === modelFilename);
+    if (Array.isArray(registryEntry?.extraServerArgs)) {
+        args.push(...registryEntry.extraServerArgs);
+    }
 
     events.emit('spawning');
 
@@ -491,6 +636,11 @@ const spawnServer = (modelPath, port = PORT, nGpuLayers = 999) => {
         `[llamaService] Spawned llama-server PID=${proc.pid} model=${path.basename(modelPath)} port=${port} nGpuLayers=${nGpuLayers}`
     );
 
+    // llama-server logs HTTP requests to stdout. The pipe MUST be drained:
+    // once ~64KB of unread output accumulates the OS pipe buffer fills and the
+    // child blocks on write, freezing the server mid-request in long sessions.
+    proc.stdout.resume();
+
     // Collect stderr for OOM/crash diagnostics — log, do not parse for control flow
     let stderrBuffer = '';
     proc.stderr.on('data', (chunk) => {
@@ -509,7 +659,7 @@ const spawnServer = (modelPath, port = PORT, nGpuLayers = 999) => {
             _proc = null;
             _currentModel = null;
         }
-        deletePid();
+        deletePid(proc.pid);
         events.emit('killed', code);
         console.log(`[llamaService] Server process closed with code ${code}`);
         if (stderrBuffer && code !== 0) {
@@ -523,7 +673,7 @@ const spawnServer = (modelPath, port = PORT, nGpuLayers = 999) => {
             _proc = null;
             _currentModel = null;
         }
-        deletePid();
+        deletePid(proc.pid);
         events.emit('error', err);
         console.error(`[llamaService] Spawn error: ${err.message}`);
     });
@@ -580,15 +730,8 @@ const ensureWhisperUnloaded = async () => {
     } catch (_timeoutErr) {
         // Whisper didn't exit naturally — force kill
         console.log(`[llamaService] Force-killing Whisper PID ${pid}`);
-        await new Promise((resolve) => {
-            execFile(
-                'taskkill',
-                ['/F', '/PID', String(pid)],
-                { windowsHide: true },
-                () => resolve()  // always resolve — exit 1 means "already dead"
-            );
-        });
-        // Confirm death after force kill (shorter timeout — taskkill /F is authoritative)
+        await platformUtils.killPid(pid);
+        // Confirm death after force kill (shorter timeout — force kill is authoritative)
         await waitForDeath(pid, 5000, 200);
     }
 
@@ -621,12 +764,13 @@ const getNGpuLayers = async () => {
     try {
         const gpuDetector = require('./gpuDetector.cjs');
         const gpu = await gpuDetector.detectGpu();
-        const hasUsableCuda = gpu.recommended === 'cuda12' || gpu.recommended === 'cuda11';
-        if (hasUsableCuda) {
+        // CUDA on Windows, Metal on Apple Silicon — both take full offload.
+        const hasUsableGpu = ['cuda12', 'cuda11', 'metal'].includes(gpu.recommended);
+        if (hasUsableGpu) {
             return 999;
         }
         if (_gpuMode === 'gpu') {
-            throw new Error('GPU mode requested but no compatible CUDA GPU was detected');
+            throw new Error('GPU mode requested but no compatible GPU was detected');
         }
         return 0;
     } catch (err) {
@@ -680,14 +824,7 @@ const cleanupZombie = async () => {
 
     if (alive) {
         console.log(`[llamaService] Killing zombie llama-server PID ${pid}`);
-        await new Promise((resolve) => {
-            execFile(
-                'taskkill',
-                ['/F', '/PID', String(pid)],
-                { windowsHide: true },
-                () => resolve()
-            );
-        });
+        await platformUtils.killPid(pid);
         try {
             await waitForDeath(pid, 10000, 200);
         } catch (err) {
@@ -712,17 +849,24 @@ const cleanupZombie = async () => {
  * @returns {{ modelKey: string, modelPath: string }}
  * @throws {Error} if model file does not exist on disk
  */
-const selectModel = (intent) => {
+const selectModelForPreference = (preference = _modelPreference) => {
     let modelKey;
-    if (_modelPreference === '4b') {
+    if (preference === '4b' || preference === 'qwen3.5-4b') {
         modelKey = 'qwen3.5-4b';
-    } else if (_modelPreference === '9b') {
+    } else if (preference === '9b' || preference === 'qwen3.5-9b') {
         modelKey = 'qwen3.5-9b';
+    } else if (preference === '35b' || preference === 'qwen3.6-35b-a3b') {
+        // Max tier is explicit-only: auto mode never picks the ~21GB MoE model.
+        modelKey = 'qwen3.6-35b-a3b';
     } else {
         // Auto: prefer 9B if installed, fall back to 4B
         const model9b = llamaDownloader.MODELS['qwen3.5-9b'];
-        const path9b = path.join(llamaDownloader.getModelsPath(), model9b.filename);
-        modelKey = fs.existsSync(path9b) ? 'qwen3.5-9b' : 'qwen3.5-4b';
+        const path9b = model9b ? path.join(llamaDownloader.getModelsPath(), model9b.filename) : null;
+        if (path9b && fs.existsSync(path9b)) {
+            modelKey = 'qwen3.5-9b';
+        } else {
+            modelKey = 'qwen3.5-4b';
+        }
     }
 
     const model = llamaDownloader.MODELS[modelKey];
@@ -735,9 +879,11 @@ const selectModel = (intent) => {
     return { modelKey, modelPath };
 };
 
+const selectModel = (_intent) => selectModelForPreference(_modelPreference);
+
 /**
  * Set the user's model preference. Called by main process when settings change.
- * @param {'auto'|'4b'|'9b'} pref
+ * @param {'auto'|'4b'|'9b'|'35b'} pref
  */
 const setModelPreference = (pref) => {
     _modelPreference = pref || 'auto';
@@ -821,7 +967,7 @@ const ensureServer = async (modelKey, modelPath) => {
     // Case 1 + 3 continued: Spawn the server with GPU mode attempt
     try {
         const proc = spawnServer(modelPath, PORT, nGpuLayers);
-        await waitForHealthOrExit(proc, PORT, 30000, 300);
+        await waitForHealthOrExit(proc, PORT, HEALTH_TIMEOUT_MS, 300);
         // Only set _currentModel after health check passes (Pitfall 3)
         _currentModel = modelKey;
     } catch (err) {
@@ -838,21 +984,24 @@ const ensureServer = async (modelKey, modelPath) => {
 
             try {
                 const proc = spawnServer(modelPath, PORT, 0); // CPU mode
-                await waitForHealthOrExit(proc, PORT, 30000, 300);
+                await waitForHealthOrExit(proc, PORT, HEALTH_TIMEOUT_MS, 300);
                 _currentModel = modelKey;
                 _isCpuFallback = true;
                 events.emit('cpu-fallback');
                 return;
             } catch (cpuErr) {
                 _currentModel = null;
+                await killServer().catch(() => {});
                 // Re-throw the CPU error — no more fallback
                 throw cpuErr;
             }
         }
 
-        // Already CPU mode or other failure — no more fallback
+        // Already CPU mode / explicit GPU mode — no more fallback. Kill the
+        // possibly still-loading process so it doesn't linger holding VRAM.
         // Do NOT emit 'error' here: spawnServer already emits on binary-not-found
         // and proc.on('error') fires for ENOENT/permission errors.
+        await killServer().catch(() => {});
         throw err;
     }
 };
@@ -912,6 +1061,42 @@ const infer = (intent, messages, temperature) =>
         }
     });
 
+const inferWithModel = (modelPreference, messages, temperature, options = {}) =>
+    enqueue(async () => {
+        const { modelKey, modelPath } = selectModelForPreference(modelPreference);
+
+        try {
+            await ensureServer(modelKey, modelPath);
+            return await postInference(PORT, messages, temperature, options.maxTokens);
+        } finally {
+            await releaseServerAfterResult();
+        }
+    });
+
+/**
+ * Streaming variant of inferWithModel. Streams the model output via SSE and
+ * invokes `options.onChunk(deltaText)` for each delta. Resolves with the final
+ * accumulated content string. Falls back to throwing on stream error; caller
+ * is responsible for retry/fallback policy.
+ */
+const inferWithModelStreaming = (modelPreference, messages, temperature, options = {}) =>
+    enqueue(async () => {
+        const { modelKey, modelPath } = selectModelForPreference(modelPreference);
+
+        try {
+            await ensureServer(modelKey, modelPath);
+            return await postInferenceStreaming(
+                PORT,
+                messages,
+                temperature,
+                options.maxTokens,
+                options.onChunk
+            );
+        } finally {
+            await releaseServerAfterResult();
+        }
+    });
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -929,11 +1114,14 @@ module.exports = {
     setGpuMode,
     getGpuMode,
     holdServer,
+    inferWithModel,
+    inferWithModelStreaming,
 
     // _internal exposes functions for testing
     _internal: {
         pollHealth,
         postInference,
+        postInferenceStreaming,
         isPidAlive,
         waitForDeath,
         writePid,

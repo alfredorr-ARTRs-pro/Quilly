@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './LlmSettingsSection.css';
 
 // ─── Format helpers ────────────────────────────────────────────────────────────
@@ -335,14 +335,25 @@ function LlmSettingsSection({
         }
     }, [undoPending]);
 
-    // Cleanup undo timer on unmount
+    // Refs mirror the pending delete + callback so the unmount effect below can
+    // read current values without re-running on every change.
+    const undoPendingRef = useRef(null);
+    const onDeleteModelRef = useRef(onDeleteModel);
+    useEffect(() => { undoPendingRef.current = undoPending; }, [undoPending]);
+    useEffect(() => { onDeleteModelRef.current = onDeleteModel; }, [onDeleteModel]);
+
+    // On unmount, COMMIT a pending delete instead of cancelling it. The row
+    // already told the user "Deleted (Undo)" — closing the Settings modal must
+    // not silently resurrect the model.
     useEffect(() => {
         return () => {
-            if (undoPending) {
-                clearTimeout(undoPending.timerId);
+            const pending = undoPendingRef.current;
+            if (pending) {
+                clearTimeout(pending.timerId);
+                Promise.resolve(onDeleteModelRef.current?.(pending.modelId)).catch(() => {});
             }
         };
-    }, [undoPending]);
+    }, []);
 
     const modelEntries = Object.entries(modelStatuses);
 

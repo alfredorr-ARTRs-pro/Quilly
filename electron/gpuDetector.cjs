@@ -2,7 +2,10 @@
 // Detects NVIDIA (via nvidia-smi), AMD, and Intel GPUs (via wmic)
 const { execFile } = require('child_process');
 
-const TIMEOUT_MS = 5000;
+// Generous timeout: on Optimus laptops the discrete GPU can take several
+// seconds to wake from D3 sleep before nvidia-smi responds. Detection is
+// cached for the session, so a slow first call is acceptable.
+const TIMEOUT_MS = 10000;
 
 let cachedResult = null;
 
@@ -92,7 +95,21 @@ const detectNvidia = async () => {
     const parts = line.split(',').map(s => s.trim());
     if (parts.length < 3) return null;
 
-    const cudaMajor = cudaVersion ? parseInt(cudaVersion.split('.')[0], 10) : null;
+    let cudaMajor = cudaVersion ? parseInt(cudaVersion.split('.')[0], 10) : null;
+
+    // Fallback: derive CUDA capability from the driver version. The plain
+    // nvidia-smi header call above can time out (laptop dGPU wake) or change
+    // format, and without cudaMajor a perfectly good NVIDIA GPU is silently
+    // demoted to CPU — observed live 2026-07-02 on an RTX 4060 ("GPU mode
+    // requested but no compatible CUDA GPU was detected"). Driver ≥ 550.54
+    // runs CUDA 12.4 builds; driver ≥ 450.80 runs CUDA 11 builds.
+    if (cudaMajor == null && parts[1]) {
+        const driverMajor = parseInt(parts[1].split('.')[0], 10);
+        if (Number.isFinite(driverMajor)) {
+            if (driverMajor >= 550) cudaMajor = 12;
+            else if (driverMajor >= 450) cudaMajor = 11;
+        }
+    }
 
     return {
         gpuName: parts[0],
@@ -141,6 +158,20 @@ const buildSummary = (gpus, nvidia) => {
  */
 const detectGpu = async () => {
     if (cachedResult) return cachedResult;
+
+    // macOS: no wmic/nvidia-smi. Apple Silicon always has a Metal-capable GPU
+    // with unified memory, so detection is a constant — llama.cpp/whisper.cpp
+    // macOS builds ship with Metal enabled.
+    if (process.platform === 'darwin') {
+        cachedResult = {
+            gpus: [{ name: 'Apple Silicon', vendor: 'apple', vramMB: null }],
+            nvidia: null,
+            recommended: 'metal',
+            summary: 'Apple Silicon · Metal',
+        };
+        console.log(`[gpuDetector] ${cachedResult.summary}`);
+        return cachedResult;
+    }
 
     console.log('[gpuDetector] Scanning for GPUs...');
 

@@ -1,0 +1,93 @@
+.about-version-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.about-product {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.about-edition {
+    margin: 0.25rem 0 0;
+}
+
+.about-update-status {
+    font-size: 0.85rem;
+    margin: 0 0 0.75rem;
+}
+
+.about-update-status--available { color: #4ade80; }
+.about-update-status--error { color: #f87171; }
+
+.about-update-status a,
+.about-inline-link,
+.about-links a {
+    color: #646cff;
+    text-decoration: none;
+}
+
+.about-update-status a:hover,
+.about-links a:hover {
+    text-decoration: underline;
+}
+
+.about-links {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 0.4rem 1rem;
+    font-size: 0.85rem;
+}
+
+.about-companies {
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.about-companies-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
+}
+
+.about-companies .about-links {
+    margin-top: 0.5rem;
+}
+
+.about-support {
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.about-donate {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.about-donate-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    border-radius: 6px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-decoration: none;
+}
+
+.about-donate--github { background: #ea4aaa; }
+.about-donate--paypal { background: #0070ba; }
+
+.about-legal {
+    margin: 1rem 0 0;
+    font-size: 0.75rem;
+    opacity: 0.6;
+}

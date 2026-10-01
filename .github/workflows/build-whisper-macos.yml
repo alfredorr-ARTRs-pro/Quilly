@@ -1,0 +1,85 @@
+name: Build whisper.cpp engine (macOS)
+
+# Manual one-shot: upstream whisper.cpp publishes no macOS CLI binaries, so
+# Quilly builds whisper-cli + parakeet-cli itself and hosts the zip on a fixed
+# engine release tag. After running this once:
+#   1. Copy the printed SHA-256 and size into MAC_WHISPER_PIN in
+#      electron/whisperCppDownloader.cjs
+#   2. Commit that pin — the macOS app refuses to install an unpinned engine.
+on:
+  workflow_dispatch:
+
+env:
+  WHISPER_TAG: v1.9.1
+
+jobs:
+  build:
+    name: Build whisper-cli + parakeet-cli (arm64, Metal)
+    runs-on: macos-14
+    permissions:
+      contents: write  # required to create the engine release
+
+    steps:
+      - name: Checkout whisper.cpp at pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: v1.9.1
+
+      - name: Configure (static, Metal embedded)
+        # Static libs + embedded metallib make the CLIs self-contained: no
+        # dylib colocation or rpath concerns when they run from userData.
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=OFF
+          -DGGML_METAL=ON
+          -DGGML_METAL_EMBED_LIBRARY=ON
+          -DWHISPER_BUILD_EXAMPLES=ON
+          -DWHISPER_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build --config Release -j 3
+
+      - name: Package
+        run: |
+          mkdir -p pkg
+          cp build/bin/whisper-cli pkg/
+          cp build/bin/parakeet-cli pkg/
+          # Bundle any dylibs that were produced despite the static config
+          # (belt-and-braces; normally none exist).
+          find build -name '*.dylib' -exec cp {} pkg/ \; || true
+          cp LICENSE pkg/
+          cd pkg
+          zip -X "../whisper-${WHISPER_TAG}-macos-arm64.zip" ./*
+          cd ..
+          ls -la "whisper-${WHISPER_TAG}-macos-arm64.zip"
+
+      - name: Print pin values (copy into whisperCppDownloader.cjs)
+        run: |
+          ZIP="whisper-${WHISPER_TAG}-macos-arm64.zip"
+          echo "── MAC_WHISPER_PIN values ──────────────────────────"
+          echo "size:   $(stat -f%z "$ZIP")"
+          echo "sha256: $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+          echo "────────────────────────────────────────────────────"
+          shasum -a 256 "$ZIP" > "$ZIP.sha256"
+
+      - name: Publish engine release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: engine-whisper-v1.9.1-macos
+          name: 'Engine: whisper.cpp v1.9.1 (macOS arm64)'
+          prerelease: true
+          files: |
+            whisper-v1.9.1-macos-arm64.zip
+            whisper-v1.9.1-macos-arm64.zip.sha256
+          body: |
+            CI-built whisper.cpp `v1.9.1` engine for Quilly on macOS (Apple Silicon, Metal).
+
+            Contains `whisper-cli` and `parakeet-cli` built from
+            [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp/releases/tag/v1.9.1)
+            with static libraries and the Metal shader library embedded.
+            Downloaded automatically by the app; verified against the
+            sha256 pin in `electron/whisperCppDownloader.cjs`.
+
+            Not an app release — install Quilly from the versioned releases instead.

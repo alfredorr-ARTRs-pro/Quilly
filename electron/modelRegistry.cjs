@@ -44,6 +44,17 @@ const REGISTRY = {
         intents: ALL_INTENTS,
         ...llamaDownloader.MODELS['qwen3.5-9b'],
     },
+    'qwen3.6-35b-a3b': {
+        id: 'qwen3.6-35b-a3b',
+        label: 'Max Model (32GB+ RAM)',
+        technicalName: 'Qwen3.6-35B-A3B (UD-Q4_K_XL)',
+        sizeLabel: '~21 GB',
+        intents: ALL_INTENTS,
+        // main.cjs refuses the download below this much total system RAM —
+        // the model needs ~23GB free to load.
+        minTotalRamGB: 28,
+        ...llamaDownloader.MODELS['qwen3.6-35b-a3b'],
+    },
 };
 
 // ─── getModelStatus ────────────────────────────────────────────────────────────

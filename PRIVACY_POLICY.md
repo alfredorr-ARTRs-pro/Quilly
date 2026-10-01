@@ -1,84 +1,80 @@
 # Privacy Policy
 
-**Quilly - Voice to Text Desktop App**
-**Last Updated: February 23, 2026**
-**Developer: Alfredo Rapetta - AIPS.studio**
+**Quilly — Voice to Text Desktop App**
+**Last updated: September 30, 2026**
+**Publisher: ARTRs pro AB (Sweden), under the A.I.P.S. brand ([aips.studio](https://aips.studio)). Created by Alfredo Rapetta.**
 
-## Introduction
+## Summary
 
-This Privacy Policy describes how Quilly ("the Application", "we", "our") handles information when you use our desktop application. Quilly is designed with privacy as a core principle — all speech processing happens locally on your device, and we do not collect, transmit, or store any personal data on external servers.
+Quilly turns your speech into text **entirely on your own computer**. We do not run any servers for Quilly, we do not collect analytics or telemetry, and your audio and text are never sent to us or to anyone else. The only network requests Quilly makes are downloading its AI components and, in the GitHub version, a daily update check (both described below).
 
-## Information We Do NOT Collect
+## What Quilly does NOT collect
 
-Quilly does **not** collect, store, or transmit any of the following:
+Quilly does not collect, receive, or transmit:
 
-- Personal identification information (name, email, address, etc.)
-- Audio recordings or transcriptions to any external server
-- Usage analytics or telemetry data
-- Location data
-- Cookies or tracking identifiers
-- Financial or payment information
+- Your audio recordings or transcriptions
+- Personal information (name, email, address, etc.)
+- Usage analytics, telemetry, or crash reports
+- Location data, cookies, advertising or tracking identifiers
+- Payment information
 
-## Local Data Processing
+## What stays on your computer
 
-### Microphone Access
+Quilly stores the following in its application data folder on your device. None of it leaves your computer.
 
-Quilly requires access to your device's microphone to capture audio for speech-to-text transcription. Audio data is:
+| Data | Why | How long |
+|---|---|---|
+| **Audio recordings** | Saved to disk first so a recording is never lost, even if transcription fails | Until you delete the recording in Quilly, or uninstall |
+| **Transcription history** (text, titles, speaker names you assign) | So you can review, edit, and reuse past transcriptions | Until you delete it in Quilly, or uninstall |
+| **Settings** (models, hotkeys, preferences) | To remember your choices | Until you uninstall |
+| **Downloaded AI models and engine programs** | To transcribe and process text offline | Until you remove them or uninstall |
 
-- Processed entirely on your local device using AI speech recognition models (OpenAI Whisper)
-- Never transmitted to any external server or cloud service
-- Never stored permanently — audio data exists only in memory during the active transcription session
+You are in full control of this data. You can delete individual recordings from within Quilly, or remove everything by uninstalling it and deleting its application data folder.
 
-### Clipboard Access
+## Permissions Quilly uses
 
-Quilly may access your system clipboard to paste transcribed text into other applications. Clipboard data is handled entirely within your local operating system and is never transmitted externally.
+- **Microphone** — to record your speech when you press the recording hotkey or the Record button. Quilly only records when you start a recording.
+- **Clipboard and keyboard input** — to paste the finished text into the app you were using. This happens locally through Windows.
+- **Camera — never used.** When you open the microphone list, Windows may ask whether Quilly can access your camera. This is because Windows lists all media devices together. Quilly never turns on, reads from, or records your camera, and it is safe to answer "No".
 
-### Local Storage
+## Downloads from third parties
 
-Quilly stores the following data locally on your device using standard application data directories:
+Quilly works offline, but it needs to download its AI components once, the first time you use them (or when you pick a different model):
 
-- **Application settings and preferences** (e.g., selected speech recognition model, auto-launch preference)
-- **Downloaded AI models** for offline speech recognition
+- **AI models** (for example Whisper, Parakeet, and Qwen) from **Hugging Face** (huggingface.co)
+- **Speech and language engine programs** (whisper.cpp, llama.cpp, sherpa-onnx) from **GitHub** (github.com)
 
-This data remains on your device and is never transmitted to any external service. You can delete this data at any time by uninstalling the application or clearing its application data folder.
+These are ordinary file downloads. As with any download, those services receive standard technical information such as your IP address, under their own privacy policies ([Hugging Face](https://huggingface.co/privacy), [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)). **No audio, text, or personal data is ever sent** as part of these downloads.
 
-## Third-Party Services
+## Update check (GitHub version only)
 
-### AI Model Downloads
+The version of Quilly downloaded from GitHub checks once a day whether a newer version exists, by asking GitHub (api.github.com) for the latest release of Quilly. Like any web request, this shares your IP address with GitHub. Nothing else is sent, and nothing about you or your use of Quilly. You can turn this off in **Settings → About & Updates**. The Microsoft Store version never does this, because the Store handles its updates.
 
-Quilly downloads open-source speech recognition models (Whisper) from Hugging Face (huggingface.co) during initial setup or when changing models. These downloads are subject to Hugging Face's privacy policy. No personal data or audio is sent to Hugging Face — only standard HTTP requests to download model files.
+## Microsoft Store
 
-### No Other Third-Party Services
+If you install Quilly from the Microsoft Store, Microsoft handles the installation and updates under the [Microsoft Privacy Statement](https://privacy.microsoft.com/privacystatement). We only receive the aggregated, anonymous statistics that Microsoft provides to all Store publishers (such as download counts). We receive nothing that identifies you.
 
-Quilly does not integrate with any advertising networks, analytics platforms, social media services, or any other third-party services that collect user data.
+## Donations
 
-## Data Security
+Quilly is free. If you choose to donate through GitHub Sponsors or PayPal, that payment is handled entirely by those services under their own privacy policies. Donating unlocks nothing in the app, and Quilly itself never sees your payment details.
 
-Since all data processing occurs locally on your device:
+## Children
 
-- Your audio and transcriptions never leave your computer
-- There are no servers that could be breached
-- Your data security is governed by your own device's security measures
+Quilly does not collect personal information from anyone, including children.
 
-## Children's Privacy
+## Your rights
 
-Quilly does not knowingly collect any personal information from anyone, including children under the age of 13. Since no personal data is collected, no special provisions for children's data are necessary.
+Because we never receive or store your personal data, there is no personal data for us to access, correct, or delete. Everything Quilly creates remains on your device under your control. If you contact us (for example by email or a GitHub issue), we use your message only to reply to you.
 
-## Changes to This Privacy Policy
+## Open source
 
-We may update this Privacy Policy from time to time. Any changes will be reflected by updating the "Last Updated" date at the top of this document. We encourage you to review this Privacy Policy periodically.
+Quilly is open source under the MIT License, so anyone can verify these practices in the source code: [github.com/alfredorr-ARTRs-pro/Quilly](https://github.com/alfredorr-ARTRs-pro/Quilly)
 
-## Your Rights
+## Changes to this policy
 
-Since Quilly does not collect or store any personal data on external servers, there is no personal data for us to provide, modify, or delete. All data generated by Quilly remains on your device under your full control.
+If this policy changes, we will update it here and change the "Last updated" date above.
 
-## Open Source
+## Contact
 
-Quilly is an open-source application. You are welcome to review the source code to verify our privacy practices at: https://github.com/alfredorr-ARTRs-pro/Quilly
-
-## Contact Us
-
-If you have any questions or concerns about this Privacy Policy, please contact us:
-
-- **Website:** https://aips.studio
-- **GitHub Issues:** https://github.com/alfredorr-ARTRs-pro/Quilly/issues
+- **Website:** [aips.studio](https://aips.studio)
+- **GitHub Issues:** [github.com/alfredorr-ARTRs-pro/Quilly/issues](https://github.com/alfredorr-ARTRs-pro/Quilly/issues)

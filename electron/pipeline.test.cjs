@@ -417,6 +417,30 @@ describe('processRecording — result shape (PROC-05)', () => {
         assert.notStrictEqual(result.output, rawText,
             'output should differ from rawTranscription when LLM transforms it');
     });
+
+    test('live draft reference does not replace raw LLM-mode content', async () => {
+        const rawText = 'translate this to Swedish no wait make it formal hello team';
+        let capturedMessages = null;
+        _mockInferImpl = async (intent, messages) => {
+            capturedMessages = messages;
+            return 'processed';
+        };
+
+        await processTranscribedText(rawText, null, {
+            routeOverride: {
+                wakeWordFound: true,
+                intent: 'freeform',
+                content: rawText,
+                rawInstruction: rawText,
+                targetLanguage: null,
+            },
+            liveDraftReference: 'hello team',
+        });
+
+        assert.strictEqual(capturedMessages[1].content, rawText);
+        assert.match(capturedMessages[0].content, /live cleaned draft/i);
+        assert.match(capturedMessages[0].content, /source of truth/i);
+    });
 });
 
 // ─── describe: buildUserContent ───────────────────────────────────────────────
@@ -506,6 +530,58 @@ describe('sanitizeOutput', () => {
         assert.notStrictEqual(result, 'fallback',
             'Short output should not trigger repetition fallback');
         assert.strictEqual(result, 'one two one two');
+    });
+
+    // ── <think> block stripping — all the degenerate shapes ─────────────────
+
+    test('strips a well-formed <think> block', () => {
+        const result = sanitizeOutput('<think>internal reasoning here</think>clean answer', 'fallback');
+        assert.strictEqual(result, 'clean answer');
+    });
+
+    test('strips a multiline <think> block', () => {
+        const result = sanitizeOutput('<think>\nline one\nline two\n</think>\nthe answer', 'fallback');
+        assert.strictEqual(result, 'the answer');
+    });
+
+    test('unclosed <think> (truncated generation) falls back instead of pasting reasoning', () => {
+        const result = sanitizeOutput('<think>reasoning that never closes because generation was cut', 'fallback');
+        assert.strictEqual(result, 'fallback');
+    });
+
+    test('close-only </think> (template pre-filled the open tag) keeps only the answer', () => {
+        const result = sanitizeOutput('some pre-filled reasoning</think>the actual answer', 'fallback');
+        assert.strictEqual(result, 'the actual answer');
+    });
+
+    test('nested <think> blocks leave no reasoning remainder', () => {
+        const result = sanitizeOutput('<think>a<think>b</think>c</think>final text', 'fallback');
+        assert.strictEqual(result, 'final text');
+    });
+
+    test('dangling <think> after real content keeps the content', () => {
+        const result = sanitizeOutput('useful answer text <think>started reasoning again', 'fallback');
+        assert.strictEqual(result, 'useful answer text');
+    });
+
+    // ── Echo detection against the actual system prompt ─────────────────────
+
+    test('legitimate "You are invited..." output survives when the real prompt differs', () => {
+        const systemPrompt = 'You are a translation engine. Translate the user text to English.';
+        const result = sanitizeOutput('You are invited to the ceremony.', 'fallback', systemPrompt);
+        assert.strictEqual(result, 'You are invited to the ceremony.');
+    });
+
+    test('true echo of the actual system prompt still falls back', () => {
+        const systemPrompt = 'You are a translation engine. Translate the user text to English.';
+        const result = sanitizeOutput('You are a translation engine. Translate the user text now.', 'fallback', systemPrompt);
+        assert.strictEqual(result, 'fallback');
+    });
+
+    test('"system:" prefix falls back even with a real prompt provided', () => {
+        const systemPrompt = 'You are a translation engine. Translate the user text to English.';
+        const result = sanitizeOutput('system: you are a helpful assistant', 'fallback', systemPrompt);
+        assert.strictEqual(result, 'fallback');
     });
 });
 

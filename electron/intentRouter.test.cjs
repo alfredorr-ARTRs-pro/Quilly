@@ -14,6 +14,7 @@ const assert = require('node:assert/strict');
 
 const {
     route,
+    setWakeWord,
     _internal: {
         tokenize,
         levenshtein,
@@ -661,5 +662,69 @@ describe('professional, email, report intent routing', () => {
         assert.notStrictEqual(result.intent, 'professional',
             '"formal" keyword must route to formal, not professional (first-match semantics)'
         );
+    });
+});
+
+// ─── setWakeWord ──────────────────────────────────────────────────────────────
+
+describe('setWakeWord', () => {
+    // Every test restores the default so the module-level state never leaks
+    // into other suites.
+    const withWakeWord = (word, fn) => {
+        setWakeWord(word);
+        try {
+            fn();
+        } finally {
+            setWakeWord('quilly');
+        }
+    };
+
+    test('custom wake word is detected and routes intents', () => {
+        withWakeWord('ixion', () => {
+            const result = route('ixion translate to french hello team');
+            assert.strictEqual(result.wakeWordFound, true);
+            assert.strictEqual(result.intent, 'translate');
+            assert.strictEqual(result.targetLanguage, 'French');
+        });
+    });
+
+    test('default "quilly" no longer triggers after switching wake word', () => {
+        withWakeWord('ixion', () => {
+            const result = route('quilly translate to french hello team');
+            assert.strictEqual(result.wakeWordFound, false);
+        });
+    });
+
+    test('5-letter custom word uses distance 1: "vision" must NOT trigger "ixion"', () => {
+        withWakeWord('ixion', () => {
+            // levenshtein("vision","ixion") === 2 — beyond the scaled tolerance
+            const result = route('the vision was clear to everyone');
+            assert.strictEqual(result.wakeWordFound, false);
+        });
+    });
+
+    test('5-letter custom word still tolerates a single-edit mishearing', () => {
+        withWakeWord('ixion', () => {
+            // "ixon" is one deletion away from "ixion"
+            const result = route('ixon rewrite this sentence please');
+            assert.strictEqual(result.wakeWordFound, true);
+            assert.strictEqual(result.intent, 'rewrite');
+        });
+    });
+
+    test('short custom word (≤4 chars) requires an exact match', () => {
+        withWakeWord('max', () => {
+            assert.strictEqual(route('macs rewrite this sentence').wakeWordFound, false);
+            assert.strictEqual(route('max rewrite this sentence').wakeWordFound, true);
+        });
+    });
+
+    test('restoring "quilly" brings back aliases and exclusions', () => {
+        setWakeWord('ixion');
+        setWakeWord('quilly');
+        // Alias detection ("keely" is a curated Whisper mishearing of quilly)
+        assert.strictEqual(route('keely rewrite this sentence').wakeWordFound, true);
+        // Exclusion list active again ("chilly" is within distance 2 but excluded)
+        assert.strictEqual(route('it was chilly outside today').wakeWordFound, false);
     });
 });

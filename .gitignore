@@ -25,7 +25,8 @@ dist-ssr
 
 # Build Output
 release
-build
+/build/*
+!/build/appx/
 notes_to_self
 *.exe
 *.zip
@@ -44,3 +45,4 @@ AGENTS.md
 .env
 .env.*
 !.env.example
+.playwright-mcp/

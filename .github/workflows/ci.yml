@@ -12,9 +12,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint-and-build:
-    name: Lint & build (Windows)
-    runs-on: windows-latest
+  lint-test-build:
+    name: Lint, test & build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-latest covers the NSIS target; macos-14 is an arm64 runner
+        # matching the Apple Silicon release target.
+        os: [windows-latest, macos-14]
 
     steps:
       - name: Checkout
@@ -23,7 +29,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 22+: `node --test` expands globs itself — required on Windows,
+          # where no shell expands electron/*.test.cjs for us.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -31,6 +39,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm test
 
       - name: Build renderer (Vite)
         run: npm run build

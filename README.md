@@ -6,13 +6,13 @@
 
 <p align="center">
   <strong>Talk more, type less.</strong><br>
-  Free, private voice dictation for Windows — with optional on-device AI polishing.
+  Free, private voice dictation for Windows and macOS — with optional on-device AI polishing.
 </p>
 
 <p align="center">
   <a href="https://github.com/alfredorr-ARTRs-pro/Quilly/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/alfredorr-ARTRs-pro/Quilly?style=flat-square&color=8b5cf6"></a>
   <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square">
-  <img alt="Platform Windows" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?style=flat-square">
+  <img alt="Platform Windows and macOS" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20%C2%B7%20macOS%20(Apple%20Silicon)-0078D6?style=flat-square">
   <a href="https://github.com/sponsors/alfredorr-ARTRs-pro"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ff69b4?style=flat-square"></a>
 </p>
 
@@ -24,7 +24,7 @@
 
 ## What is Quilly?
 
-Quilly turns your voice into text — anywhere you can type on Windows.
+Quilly turns your voice into text — anywhere you can type, on Windows and macOS.
 
 Press a hotkey, speak naturally, press again to stop. [Whisper](https://github.com/openai/whisper) transcribes your voice locally. Optionally, a small on-device language model polishes the result — fixing grammar, reformatting, translating, answering a question, whatever you asked for. The final text pastes automatically into whatever app you were using.
 
@@ -34,12 +34,15 @@ Press a hotkey, speak naturally, press again to stop. [Whisper](https://github.c
 
 - **Fully private** — all AI inference runs locally on your CPU or NVIDIA GPU
 - **Free and open source** — MIT licensed, no subscriptions, no account
-- **Works everywhere in Windows** — any text field in any app, via a global hotkey
+- **Works everywhere** — any text field in any app, via a global hotkey
 - **AI-polished output** — optional local LLM rewrites, translates, summarizes, answers
 - **Small and unobtrusive** — a tiny floating indicator, lives in the system tray
 - **Hotkey or wake word** — start with a keystroke, or just say your chosen wake word
-- **Built-in history** — review past transcriptions, replay the audio
-- **GPU-accelerated** — CUDA support for fast inference; CPU-only works too
+- **Speaker detection** — split any recording by who spoke, with per-speaker transcripts and renameable speakers
+- **Review before pasting** — optional mode that shows the AI result in a popup so you approve it before it's pasted
+- **Built-in history** — review, edit, and retry past transcriptions, replay the audio
+- **Crash-safe recordings** — audio is saved to disk the moment you stop speaking, before transcription starts
+- **GPU-accelerated** — CUDA on Windows, Metal on Apple Silicon; CPU-only works too
 
 ## See it in action
 
@@ -79,11 +82,23 @@ All hotkeys are customizable in Settings → Hotkeys.
 
 ## Install
 
+### Windows
+
 > **Requires Windows 10 or 11 (64-bit).**
 
 1. Go to the **[Releases page](https://github.com/alfredorr-ARTRs-pro/Quilly/releases)**
 2. Download `Quilly-V-X.X.X-Setup.exe` (latest version)
 3. Run the installer
+
+### macOS
+
+> **Requires an Apple Silicon Mac (M1 or newer).**
+
+1. Go to the **[Releases page](https://github.com/alfredorr-ARTRs-pro/Quilly/releases)**
+2. Download `Quilly-V-X.X.X-macOS-arm64.dmg` and drag Quilly into Applications
+3. On first launch, approve the app under **System Settings → Privacy & Security → Open Anyway** (not notarized yet)
+
+Full walkthrough incl. Gatekeeper and permissions: **[macOS Install Guide](docs/INSTALL-MACOS.md)**.
 
 ### About the SmartScreen warning
 
@@ -130,6 +145,10 @@ Prefer not to press hotkeys? Turn on the wake word in Settings. Default is **"Qu
 
 Full hotkey and wake-word reference: **[Hotkeys Guide](docs/hotkeys.md)**.
 
+### Speaker detection (optional)
+
+Recorded a meeting or interview? Open **Dashboard → History** and click the **👥** button on any recording. Quilly separates the audio by voice — fully on-device — and shows a per-speaker transcript inline. Click a speaker's name to rename it (e.g. "Anna", "Client"). Prefer it always on? Enable **Auto-detect speakers on new recordings** in Settings.
+
 ## AI models
 
 Quilly uses two kinds of local AI models. Both download automatically on first use, from official sources.
@@ -144,7 +163,9 @@ Choose your model in Settings → AI Models:
 | Base | ~142 MB | Fast | Good |
 | **Small** *(recommended)* | ~466 MB | Balanced | Very good |
 | Medium | ~1.5 GB | Moderate | Excellent |
+| Large v3 Turbo | ~1.6 GB | Fast on GPU | Near best-in-class |
 | Large v3 | ~3.1 GB | Slowest | Best-in-class |
+| Parakeet v3 | ~1.2 GB | Much faster than Whisper | Excellent — auto-detects 25 European languages |
 
 ### Language model — Qwen *(optional)*
 
@@ -154,6 +175,7 @@ Only required if you want AI-polished output via `Ctrl + Alt + P`. Download via 
 |---|---|---|
 | Qwen **4B** | ~2.7 GB | Most machines, faster inference |
 | Qwen **9B** | ~5.7 GB | Best quality, ideal on GPU or 16 GB+ RAM |
+| Qwen **35B "Max"** | ~21 GB | Power users with 32 GB+ RAM — never selected automatically, opt-in only |
 
 ### GPU vs CPU
 
@@ -168,20 +190,20 @@ Deep dive on models, sizing, and GPU setup: **[AI Setup Guide](docs/ai-setup.md)
 - **All processing is on your device.** Transcription and language modeling never leave your computer.
 - **No telemetry, no analytics, no accounts.**
 - **The only network calls** Quilly makes are downloading AI model files from their official repositories (HuggingFace) the first time you enable a model.
-- **Your voice recordings** are stored locally in your Windows `AppData` folder. Delete them anytime from Dashboard → History.
+- **Your voice recordings** are stored locally in your user data folder (`AppData` on Windows, `~/Library/Application Support` on macOS). Delete them anytime from Dashboard → History.
 - **Open source** — [inspect the code yourself](https://github.com/alfredorr-ARTRs-pro/Quilly).
 
 ## System requirements
 
 **Minimum:**
-- Windows 10 (64-bit) or Windows 11
+- Windows 10 (64-bit) / Windows 11, or macOS 12+ on Apple Silicon (M1 or newer)
 - 8 GB RAM
 - ~2 GB free disk (app + smallest Whisper model)
 - A microphone
 
 **Recommended:**
 - 16 GB+ RAM
-- NVIDIA GPU with CUDA 12.4+
+- NVIDIA GPU with CUDA 12.4+ (Windows) — Apple Silicon uses Metal automatically
 - ~10 GB free disk (for larger models)
 
 ## Troubleshooting
@@ -214,13 +236,13 @@ For the full issue list and solutions, see the **[Troubleshooting Guide](docs/tr
 
 **Does it work offline?** Yes, once models are downloaded the first time.
 
-**Does it work on Mac or Linux?** Not yet — Windows only. Mac and Linux support are on the roadmap.
+**Does it work on Mac or Linux?** Windows and Apple Silicon Macs are supported ([macOS install guide](docs/INSTALL-MACOS.md)). Linux is on the roadmap.
 
-**What microphones are supported?** Any microphone Windows recognizes — built-in, USB, Bluetooth, headsets, gaming mics.
+**What microphones are supported?** Any microphone your system recognizes — built-in, USB, Bluetooth, headsets, gaming mics.
 
 **Can I change the hotkeys?** Yes. Settings → Hotkeys.
 
-**How accurate is the transcription?** Small Whisper (default) is very good for clear speech across many languages and stays light on disk. Step up to Medium or Large v3 if you want top-tier accuracy.
+**How accurate is the transcription?** Small Whisper (default) is very good for clear speech across many languages and stays light on disk. Step up to Large v3 Turbo (or Large v3) for top-tier accuracy, or try Parakeet v3 for the fastest transcription of European languages.
 
 **Does it auto-update?** Not yet — check the Releases page. On the roadmap.
 
@@ -252,11 +274,15 @@ If you want something like Quilly — or bigger — for your team, let's talk.
 
 **Visit [aips.studio](https://aips.studio)** or reach out via [GitHub Discussions](https://github.com/alfredorr-ARTRs-pro/Quilly/discussions).
 
+The companies behind Quilly:
+
+- **[ARTRs Pro](https://artrspro.com)**: AI agents, automation and industrial engineering
+- **[MyPCFriends](https://mypcfriends.com)**: managed IT and cybersecurity
+
 ## Roadmap
 
 - Code-signed installer (SignPath Foundation application in progress)
 - In-app auto-updates
-- macOS support
 - Linux support
 - Custom AI prompt templates
 - Multi-language wake-word support
@@ -298,7 +324,7 @@ Full third-party license texts live in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LIC
 
 MIT — see [LICENSE](LICENSE).
 
-Copyright © 2026 Alfredo Rapetta (A.I.P.S. — [aips.studio](https://aips.studio))
+Copyright © 2026 ARTRs pro AB (A.I.P.S. — [aips.studio](https://aips.studio)). Created by Alfredo Rapetta.
 
 ---
 

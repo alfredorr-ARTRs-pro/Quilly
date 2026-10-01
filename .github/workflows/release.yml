@@ -1,18 +1,17 @@
 name: Release
 
-# Triggered when you push a version tag, for example:
-# git tag v1.0.0 public-main && git push public v1.0.0
+# Triggered when you push a version tag (e.g. `git tag v1.2.1 && git push --tags`)
 on:
   push:
     tags:
       - 'v*'
 
 jobs:
-  build-and-release:
-    name: Build Windows release
+  build-windows:
+    name: Build Windows installer & create GitHub Release
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: write  # required to create a release
 
     steps:
       - name: Checkout
@@ -21,21 +20,25 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build renderer
+      - name: Build renderer (Vite)
         run: npm run build
 
-      - name: Build Windows installer and portable zip
+      - name: Build Windows installer (electron-builder)
         run: npx electron-builder --win --publish never
         env:
+          # Disables electron-builder's own auto-publish; we use softprops below instead.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # SignPath Foundation signing step - enable once the project is approved.
+      # ──────────────────────────────────────────────────────────────────
+      # SignPath Foundation signing step — ADD ONCE SIGNPATH IS APPROVED
+      # Replace the placeholder with the real action once your project is
+      # registered at https://signpath.org.
       #
       # - name: Sign installer via SignPath
       #   uses: signpath/github-action-submit-signing-request@v1
@@ -48,12 +51,26 @@ jobs:
       #     github-artifact-id: release
       #     wait-for-completion: true
       #     output-artifact-directory: release
+      # ──────────────────────────────────────────────────────────────────
+
+      # Microsoft Store package. Uploaded unsigned — Partner Center re-signs it
+      # after certification — so it is kept as a workflow artifact for manual
+      # submission rather than attached to the public release.
+      - name: Build Microsoft Store package (MSIX)
+        run: npx electron-builder --win appx --publish never
+
+      - name: Upload Store package
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-package
+          path: release/*.appx
+          retention-days: 30
 
       - name: Compute SHA-256 checksums
         shell: pwsh
         run: |
-          $releaseFiles = Get-ChildItem -Path "release" -File | Where-Object { $_.Extension -in ".exe", ".zip" }
-          foreach ($file in $releaseFiles) {
+          $exeFiles = Get-ChildItem -Path "release" -Filter "*.exe" -File
+          foreach ($file in $exeFiles) {
             $hash = Get-FileHash -Algorithm SHA256 $file.FullName
             "$($hash.Hash)  $($file.Name)" | Out-File -FilePath "release/$($file.Name).sha256" -Encoding ascii
             Write-Host "SHA-256 ($($file.Name)): $($hash.Hash)"
@@ -64,46 +81,108 @@ jobs:
         with:
           files: |
             release/*.exe
-            release/*.zip
             release/*.sha256
-          generate_release_notes: false
+          generate_release_notes: true
           draft: false
           prerelease: false
           body: |
-            ## Quilly ${{ github.ref_name }} Hotfix
+            ## Installation
 
-            This release improves local AI routing so supported GPU systems stay on the GPU more reliably for both transcription and text processing, while also tightening cleanup after results are delivered.
+            ### Windows
 
-            ### Downloads
+            1. Download the `.exe` installer attached below
+            2. Run the installer
+            3. If Windows SmartScreen warns, click **More info → Run anyway** (the installer isn't code-signed yet — see [README](https://github.com/alfredorr-ARTRs-pro/Quilly#about-the-smartscreen-warning) for details)
 
-            - **Windows installer:** download the `Quilly-V-*-Setup.exe` asset for the standard installation experience.
-            - **Portable ZIP:** download the `Quilly-V-*-Portable.zip` asset if you prefer to unpack and run Quilly without an installer.
-            - **Checksums:** each download includes a matching `.sha256` file for verification.
+            ### macOS (Apple Silicon)
 
-            ### Highlights
+            1. Download the `.dmg` below and drag **Quilly** into **Applications**
+            2. On first launch macOS will block the app (it isn't notarized yet). Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** — see the [macOS install guide](https://github.com/alfredorr-ARTRs-pro/Quilly/blob/main/docs/INSTALL-MACOS.md) for a full walkthrough
+            3. Grant microphone access when prompted, and enable Quilly under **Privacy & Security → Accessibility** so auto-paste works
 
-            - Improves local LLM runtime selection so the correct CUDA build is used when GPU mode is available.
-            - Preserves selected Whisper model and language handling more reliably during translate-to-English flows.
-            - Reduces fallback CPU and memory usage by releasing local AI resources more aggressively after each result.
-            - Local-first voice transcription workflow for Windows.
-            - Desktop tray integration for quick access.
-            - Audio import, review, and correction tools.
-            - Optional local AI setup for enhanced processing.
+            ### Verify your download (optional)
 
-            ### Important note
+            Each artifact ships with a matching `.sha256` checksum file.
 
-            This public build is not code-signed yet. Windows SmartScreen may show a warning until the installer earns reputation or signing is enabled. If you see that warning, choose **More info** and then **Run anyway** only if you downloaded Quilly from this official release page.
-
-            ### Verify your download
-
-            From PowerShell, run:
+            Windows (PowerShell):
 
             ```powershell
-            Get-FileHash .\Quilly-V-*-Setup.exe -Algorithm SHA256
+            Get-FileHash Quilly-V-*-Setup.exe
             ```
 
-            Compare the result with the matching `.sha256` file attached to this release.
+            macOS (Terminal):
+
+            ```sh
+            shasum -a 256 Quilly-V-*-macOS-arm64.dmg
+            ```
+
+            Compare the output against the contents of the `.sha256` file before running.
 
             ---
 
-            Built by [A.I.P.S.](https://aips.studio). Released under the MIT License.
+            Built with care by [A.I.P.S.](https://aips.studio)
+
+  build-macos:
+    name: Build macOS dmg/zip & attach to Release
+    runs-on: macos-14
+    # Serialize after the Windows job so both jobs never race to create the
+    # same release; this job only attaches artifacts to it.
+    needs: build-windows
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        run: npm run build
+
+      - name: Build macOS app (electron-builder)
+        run: npx electron-builder --mac --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ──────────────────────────────────────────────────────────────────
+      # Notarization — ENABLE ONCE AN APPLE DEVELOPER ACCOUNT EXISTS
+      # 1. Create a Developer ID Application certificate, export as .p12,
+      #    base64-encode it into the CSC_LINK secret (password: CSC_KEY_PASSWORD).
+      # 2. Set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID secrets.
+      # 3. Remove `"identity": null` from the mac block in package.json.
+      # 4. Move these env vars onto the electron-builder step above:
+      #
+      #   CSC_LINK: ${{ secrets.CSC_LINK }}
+      #   CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      #   APPLE_ID: ${{ secrets.APPLE_ID }}
+      #   APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # ──────────────────────────────────────────────────────────────────
+
+      - name: Compute SHA-256 checksums
+        run: |
+          cd release
+          for f in *.dmg *.zip; do
+            [ -e "$f" ] || continue
+            shasum -a 256 "$f" > "$f.sha256"
+            cat "$f.sha256"
+          done
+
+      - name: Attach macOS artifacts to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/*.zip
+            release/*.dmg.sha256
+            release/*.zip.sha256
+          draft: false
+          prerelease: false

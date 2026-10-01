@@ -71,7 +71,12 @@ const setWakeWord = (word) => {
         _wakeAliases = DEFAULT_WAKE_ALIASES;
         _wakeExclusions = DEFAULT_WAKE_EXCLUSIONS;
     } else {
-        _wakeDistance = DEFAULT_WAKE_DISTANCE;
+        // Custom wake words have no curated exclusion list, so a fixed distance
+        // of 2 would false-positive on huge swaths of everyday vocabulary
+        // (e.g. "vision" and "onion" are both within 2 edits of "ixion").
+        // Scale tolerance to word length instead: ≤4 chars → exact match only,
+        // 5-6 chars → 1 edit, ≥7 chars → 2 edits.
+        _wakeDistance = normalized.length <= 4 ? 0 : (normalized.length <= 6 ? 1 : 2);
         _wakeAliases = [normalized];
         _wakeExclusions = new Set();
     }

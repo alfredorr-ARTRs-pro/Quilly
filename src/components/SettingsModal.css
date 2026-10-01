@@ -18,7 +18,7 @@
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     width: 90%;
-    max-width: 540px;
+    max-width: 760px;
     max-height: 80vh;
     overflow: hidden;
     display: flex;
@@ -71,6 +71,320 @@
     color: #666;
     font-size: 0.9rem;
     margin: 0 0 1rem 0;
+}
+
+.developer-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.developer-header-row,
+.developer-actions,
+.developer-profile-grid,
+.developer-rules-grid {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.developer-header-row {
+    align-items: center;
+    justify-content: space-between;
+}
+
+.developer-muted,
+.developer-status,
+.developer-error {
+    margin: 0.75rem 0 0;
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
+.developer-muted {
+    color: #858899;
+}
+
+.developer-status {
+    color: #9fd9b3;
+}
+
+.developer-unsaved {
+    margin: 0.75rem 0 0;
+    color: #ffd88a;
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
+.developer-error {
+    color: #ff8b8b;
+}
+
+.developer-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1rem;
+}
+
+.developer-profile-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 180px);
+}
+
+.developer-profile-grid--single {
+    grid-template-columns: minmax(120px, 180px);
+}
+
+.developer-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    color: #e8e8e8;
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.developer-field input,
+.developer-field select,
+.developer-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.07);
+    color: #f2f2f2;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 0.6rem 0.7rem;
+    font: inherit;
+}
+
+.developer-field select option {
+    background: #1a1a2e;
+    color: #f2f2f2;
+}
+
+.developer-textarea {
+    min-height: 120px;
+    resize: vertical;
+    line-height: 1.45;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 0.78rem;
+}
+
+.developer-textarea--large {
+    min-height: 210px;
+}
+
+.developer-textarea--small {
+    min-height: 84px;
+}
+
+.developer-actions {
+    flex-wrap: wrap;
+}
+
+.primary-btn,
+.secondary-btn,
+.danger-btn {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.primary-btn {
+    background: rgba(102, 126, 234, 0.55);
+}
+
+.secondary-btn {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.danger-btn {
+    background: rgba(255, 100, 100, 0.18);
+    color: #ffb1b1;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.danger-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.developer-subsection {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+
+.developer-subsection h4 {
+    margin: 0;
+    color: #e8e8e8;
+    font-size: 0.95rem;
+}
+
+.developer-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    color: #cfcfe4;
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.developer-checkbox input {
+    margin-top: 0.1rem;
+    accent-color: #667eea;
+}
+
+.developer-info-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.developer-info-button {
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    border: 1px solid rgba(168, 184, 255, 0.55);
+    background: rgba(168, 184, 255, 0.1);
+    color: #c9d2ff;
+    font-size: 0.68rem;
+    line-height: 1;
+    cursor: help;
+    padding: 0;
+    flex: 0 0 auto;
+}
+
+.developer-rules-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.developer-test-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.developer-result-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.developer-result-block span {
+    color: #a8b8ff;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.developer-result-block pre {
+    max-height: 180px;
+    overflow: auto;
+    margin: 0;
+    padding: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: #f2f2f2;
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.live-draft-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.live-draft-settings-row,
+.live-cleanup-mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.live-cleanup-mode-row {
+    margin-top: 1rem;
+    align-items: flex-start;
+}
+
+.final-cleanup-settings-row {
+    margin-top: 1rem;
+}
+
+.live-draft-label-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.live-draft-label,
+.live-cleanup-mode-label {
+    color: #e8e8e8;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.live-draft-description {
+    color: #777;
+    font-size: 0.82rem;
+}
+
+.final-cleanup-hint {
+    color: #a8b8ff;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.live-cleanup-segmented {
+    display: inline-flex;
+    padding: 3px;
+    gap: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+}
+
+.live-cleanup-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.45rem;
+    max-width: 360px;
+}
+
+.live-cleanup-mode-description {
+    color: #858899;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    text-align: right;
+}
+
+.live-cleanup-segmented button {
+    border: none;
+    background: transparent;
+    color: #aaa;
+    border-radius: 6px;
+    padding: 0.4rem 0.65rem;
+    cursor: pointer;
+}
+
+.live-cleanup-segmented button.selected {
+    background: rgba(102, 126, 234, 0.35);
+    color: #fff;
 }
 
 .error-message {
@@ -496,6 +810,7 @@
     display: block;
     margin-top: 4px;
 }
+
 
 /* ─── Review-first Mode Section ─────────────────────────────────────────────── */
 

@@ -3,11 +3,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
     // Indicator controls
     hideIndicator: () => ipcRenderer.invoke('hide-indicator'),
+    recordingStartFailed: (name, message) => ipcRenderer.invoke('recording-start-failed', { name, message }),
     pasteText: (text) => ipcRenderer.invoke('paste-text', text),
     transcriptionComplete: (text, x, y, audioData, audioPath, options) => ipcRenderer.invoke('transcription-complete', { text, x, y, audioData, audioPath, ...options }),
 
     // Window info
     getWindowType: () => ipcRenderer.invoke('get-window-type'),
+    isWindowsStore: () => ipcRenderer.invoke('app-is-windows-store'),
+    getAppInfo: () => ipcRenderer.invoke('app-info'),
+    checkForUpdates: () => ipcRenderer.invoke('update-check'),
 
     // Whisper transcription
     transcribe: (audioPath, options) => ipcRenderer.invoke('whisper-transcribe', audioPath, options),
@@ -18,6 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Settings
     getSettings: () => ipcRenderer.invoke('settings-get'),
     setSetting: (key, value) => ipcRenderer.invoke('settings-set', key, value),
+    developerConfigGet: () => ipcRenderer.invoke('developer-config:get'),
+    developerConfigSave: (config) => ipcRenderer.invoke('developer-config:save', config),
+    developerConfigSetActive: (profileId) => ipcRenderer.invoke('developer-config:set-active', { profileId }),
+    developerConfigResetActive: (profileId) => ipcRenderer.invoke('developer-config:reset-active', { profileId }),
+    developerConfigTestFinalCleanup: (payload) => ipcRenderer.invoke('developer-config:test-final-cleanup', payload),
+    developerConfigTestFreeform: (payload) => ipcRenderer.invoke('developer-config:test-freeform', payload),
 
     // Auto-launch (start with Windows)
     getAutoLaunch: () => ipcRenderer.invoke('auto-launch-get'),
@@ -33,6 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveAudioTemp: (arrayBuffer, filename) => ipcRenderer.invoke('save-audio-temp', arrayBuffer, filename),
     saveAudioFile: (sourcePath) => ipcRenderer.invoke('save-audio-file', sourcePath),
     readAudioFile: (filePath) => ipcRenderer.invoke('read-audio-file', filePath),
+    deleteAudioFile: (filePath) => ipcRenderer.invoke('delete-audio-file', filePath),
 
     // Save transcription to history
     saveToHistory: (recording) => ipcRenderer.invoke('save-to-history', recording),
@@ -45,6 +56,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const handler = (_event, progress) => callback(progress);
         ipcRenderer.on('whisper-cpp-progress', handler);
         return () => ipcRenderer.removeListener('whisper-cpp-progress', handler);
+    },
+
+    // Speaker diarization
+    diarizeStatus: () => ipcRenderer.invoke('diarize:status'),
+    diarizeSetup: () => ipcRenderer.invoke('diarize:setup'),
+    diarizeRun: (audioArray, numSpeakers) => ipcRenderer.invoke('diarize:run', audioArray, numSpeakers),
+    onDiarizeSetupProgress: (callback) => {
+        const handler = (_event, progress) => callback(progress);
+        ipcRenderer.on('diarize:setup-progress', handler);
+        return () => ipcRenderer.removeListener('diarize:setup-progress', handler);
     },
 
     // LLM model management
@@ -97,6 +118,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('add-recording', handler);
         return () => ipcRenderer.removeListener('add-recording', handler);
     },
+    updateRecording: (id, updates) => ipcRenderer.invoke('update-recording', id, updates),
+    onUpdateRecording: (callback) => {
+        const handler = (_event, payload) => callback(payload);
+        ipcRenderer.on('update-recording', handler);
+        return () => ipcRenderer.removeListener('update-recording', handler);
+    },
 
     // Recording control events from main process
     onStartRecording: (callback) => {
@@ -123,4 +150,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     reviewPopupOutcome: (reason) => ipcRenderer.invoke('review-popup:outcome', { reason }),
     reviewPopupCopyToClipboard: (text) => ipcRenderer.invoke('review-popup:copy', text),
+
 });

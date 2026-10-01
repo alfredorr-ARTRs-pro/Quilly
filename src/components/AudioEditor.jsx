@@ -21,6 +21,29 @@ const ZOOM_PRESETS = [
     { label: '50ms', value: 10000, description: '50ms precision' },
 ];
 
+const RECORDING_MIME_TYPES = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+];
+
+function createSupportedMediaRecorder(stream) {
+    const MediaRecorderCtor = globalThis.MediaRecorder;
+    if (!MediaRecorderCtor) {
+        throw new Error('Audio recording is not available in this window');
+    }
+
+    const mimeType = typeof MediaRecorderCtor.isTypeSupported === 'function'
+        ? RECORDING_MIME_TYPES.find(type => MediaRecorderCtor.isTypeSupported(type))
+        : '';
+
+    return mimeType
+        ? new MediaRecorderCtor(stream, { mimeType })
+        : new MediaRecorderCtor(stream);
+}
+
 // Convert AudioBuffer to WAV Blob
 function audioBufferToWavBlob(audioBuffer) {
     const numberOfChannels = audioBuffer.numberOfChannels;
@@ -68,9 +91,16 @@ function audioBufferToWavBlob(audioBuffer) {
     return new Blob([buffer], { type: 'audio/wav' });
 }
 
-const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordingComplete, isTranscribing, isProcessingLlm, processingState, onCancelProcess, onRetryProcess }, ref) => {
+// Stable chip palette for the diarization speaker view — indexed by speaker id.
+const SPEAKER_COLORS = ['#6c8cff', '#ff8c6c', '#5ec97b', '#c96ee0', '#e0b45e', '#5ecfc9', '#e05e7c', '#9b8cff'];
+const speakerColor = (id) => SPEAKER_COLORS[Math.abs(id) % SPEAKER_COLORS.length];
+const formatClock = (secs) => `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
+
+const AudioEditor = forwardRef(({ audioBlob, initialTranscript, onTranscribe, onProcess, onRecordingComplete, isTranscribing, isProcessingLlm, processingState, onCancelProcess, onRetryProcess, diarization, onRenameSpeaker }, ref) => {
     const containerRef = useRef(null);
     const wavesurferRef = useRef(null);
+    // Diarization speaker view: inline rename state ({id, value} | null)
+    const [renamingSpeaker, setRenamingSpeaker] = useState(null);
     const regionsRef = useRef(null);
     const mediaRecorderRef = useRef(null);
     const chunksRef = useRef([]);
@@ -83,7 +113,11 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
     // Creating/closing separate contexts per operation is expensive — each allocates OS audio resources.
     const getAudioContext = useCallback(async () => {
         if (!sharedAudioCtxRef.current || sharedAudioCtxRef.current.state === 'closed') {
-            sharedAudioCtxRef.current = new AudioContext();
+            const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+            if (!AudioContextCtor) {
+                throw new Error('Web Audio is not available in this window');
+            }
+            sharedAudioCtxRef.current = new AudioContextCtor();
         }
         if (sharedAudioCtxRef.current.state === 'suspended') {
             await sharedAudioCtxRef.current.resume();
@@ -392,7 +426,6 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
     // Store segments in a ref so we can access current value in event handlers without re-creating WaveSurfer
     const segmentsRef = useRef(segments);
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/immutability -- standard "latest ref" pattern; ref intentionally tracks state
         segmentsRef.current = segments;
     }, [segments]);
 
@@ -471,7 +504,7 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                 try {
                     const arrayBuffer = await audioBlob.arrayBuffer();
                     const audioCtx = await getAudioContext();
-                    const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                    const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
                     originalAudioBufferRef.current = decodedBuffer;
                     currentAudioBufferRef.current = decodedBuffer;
                     internalBlobRef.current = audioBlob;
@@ -495,41 +528,72 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
         }
     }, [audioBlob, getAudioContext]);
 
-    // Enumerate audio input devices
+    // Enumerate audio input devices. Deliberately lazy (first dropdown open, or
+    // the refresh button): Chromium's enumeration also probes cameras, which in
+    // the Microsoft Store (MSIX) build makes Windows ask for camera access. Until
+    // the list is loaded, recording uses the Windows default microphone.
+    const [devicesLoaded, setDevicesLoaded] = useState(false);
+    const [isWindowsStore, setIsWindowsStore] = useState(false);
+    useEffect(() => {
+        window.electronAPI?.isWindowsStore?.().then(v => setIsWindowsStore(Boolean(v))).catch(() => {});
+    }, []);
+
     const refreshDevices = useCallback(async () => {
         try {
+            const mediaDevices = globalThis.navigator?.mediaDevices;
+            if (!mediaDevices?.getUserMedia || !mediaDevices?.enumerateDevices) {
+                throw new Error('Microphone access is not available in this window');
+            }
+
             // Request permission first (needed to get device labels)
-            await navigator.mediaDevices.getUserMedia({ audio: true })
+            await mediaDevices.getUserMedia({ audio: true })
                 .then(stream => stream.getTracks().forEach(t => t.stop()));
 
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioInputs = devices.filter(d => d.kind === 'audioinput');
+            const devices = await mediaDevices.enumerateDevices();
+            // Chromium's own "default" entry duplicates the "Default microphone"
+            // option ('' = let Windows choose), so it is left out of the list.
+            const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default');
             console.log('Available audio devices:', audioInputs.map(d => ({ id: d.deviceId, label: d.label })));
             setAudioDevices(audioInputs);
+            setDevicesLoaded(true);
 
-            // Select first non-default device if available, or keep current selection
-            if (!selectedDeviceId && audioInputs.length > 0) {
-                const nonDefault = audioInputs.find(d => !d.label.toLowerCase().includes('default'));
-                setSelectedDeviceId(nonDefault?.deviceId || audioInputs[0].deviceId);
-            }
+            // Drop a selection whose device has been unplugged.
+            setSelectedDeviceId(current => (
+                current && !audioInputs.some(d => d.deviceId === current) ? '' : current
+            ));
         } catch (err) {
             console.error('Failed to enumerate devices:', err);
         }
-    }, [selectedDeviceId]);
+    }, []);
 
+    const loadDevicesOnce = useCallback(() => {
+        if (!devicesLoaded) refreshDevices();
+    }, [devicesLoaded, refreshDevices]);
+
+    // Track plugged/unplugged mics only once the list exists — subscribing to
+    // devicechange starts the same camera probe as enumerateDevices().
     useEffect(() => {
-        refreshDevices();
-        // Listen for device changes
-        navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
-        return () => navigator.mediaDevices.removeEventListener('devicechange', refreshDevices);
-    }, [refreshDevices]);
+        const mediaDevices = globalThis.navigator?.mediaDevices;
+        if (!devicesLoaded || !mediaDevices?.addEventListener) {
+            return undefined;
+        }
+        mediaDevices.addEventListener('devicechange', refreshDevices);
+        return () => mediaDevices.removeEventListener?.('devicechange', refreshDevices);
+    }, [devicesLoaded, refreshDevices]);
 
     const [isPreparing, setIsPreparing] = useState(false);
     const [recordingElapsed, setRecordingElapsed] = useState(0);
     const recordingTimerRef = useRef(null);
+    const prepareTimeoutRef = useRef(null);
 
     const startRecording = useCallback(async () => {
+        let stream = null;
         try {
+            const mediaDevices = globalThis.navigator?.mediaDevices;
+            if (!mediaDevices?.getUserMedia) {
+                throw new Error('Microphone access is not available in this window');
+            }
+
             // Request audio from selected device
             // Enable autoGainControl to boost quiet microphones
             const audioConstraints = {
@@ -540,7 +604,7 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
             if (selectedDeviceId) {
                 audioConstraints.deviceId = { exact: selectedDeviceId };
             }
-            const stream = await navigator.mediaDevices.getUserMedia({
+            stream = await mediaDevices.getUserMedia({
                 audio: audioConstraints
             });
 
@@ -550,8 +614,7 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
             console.log('Audio track:', audioTrack?.label, 'enabled:', audioTrack?.enabled, 'muted:', audioTrack?.muted);
             console.log('Track settings:', settings);
 
-            // Let browser choose best codec
-            const mediaRecorder = new MediaRecorder(stream);
+            const mediaRecorder = createSupportedMediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
             chunksRef.current = [];
 
@@ -563,24 +626,43 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
             };
 
             mediaRecorder.onstop = async () => {
-                // ... (onstop logic remains same) ...
-                const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-                internalBlobRef.current = blob;
-                console.log('Recording stopped. Blob created:', blob.size, blob.type, 'chunks:', chunksRef.current.length);
+                if (prepareTimeoutRef.current) {
+                    clearTimeout(prepareTimeoutRef.current);
+                    prepareTimeoutRef.current = null;
+                }
+                setIsPreparing(false);
+                setIsRecording(false);
 
                 // Stop tracks before loading to wavesurfer
                 stream.getTracks().forEach(track => track.stop());
 
-                const url = URL.createObjectURL(blob);
                 try {
-                    await wavesurferRef.current.load(url);
+                    const recordedType = mediaRecorder.mimeType || chunksRef.current[0]?.type || 'audio/webm';
+                    const blob = new Blob(chunksRef.current, { type: recordedType });
+                    console.log('Recording stopped. Blob created:', blob.size, blob.type, 'chunks:', chunksRef.current.length);
+                    if (blob.size === 0) {
+                        throw new Error('Recording did not capture any audio');
+                    }
 
                     // Decode and store audio buffer for editing
                     const arrayBuffer = await blob.arrayBuffer();
                     const audioCtx = await getAudioContext();
-                    const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                    const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+                    if (!Number.isFinite(decodedBuffer.duration) || decodedBuffer.duration <= 0) {
+                        throw new Error('Recording has no playable duration');
+                    }
+
+                    const wavBlob = audioBufferToWavBlob(decodedBuffer);
+                    internalBlobRef.current = wavBlob;
                     originalAudioBufferRef.current = decodedBuffer;
                     currentAudioBufferRef.current = decodedBuffer;
+
+                    const url = URL.createObjectURL(wavBlob);
+                    try {
+                        await wavesurferRef.current.load(url);
+                    } finally {
+                        URL.revokeObjectURL(url);
+                    }
 
                     // Initialize segments for new recording
                     setSegments([{
@@ -589,13 +671,16 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                         originalEnd: decodedBuffer.duration,
                         name: null,
                     }]);
+                    setDuration(decodedBuffer.duration);
+                    setHasAudio(true);
                     setSelectedSegmentIndex(null);
+
+                    if (onRecordingComplete) {
+                        onRecordingComplete(wavBlob);
+                    }
                 } catch (err) {
                     console.error('Wavesurfer load error:', err);
-                }
-
-                if (onRecordingComplete) {
-                    onRecordingComplete(blob);
+                    toast.error('Failed to load recording: ' + err.message);
                 }
             };
 
@@ -606,24 +691,43 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
             setIsPreparing(true);
 
             // Wait 1.5s then show "Recording" state
-            setTimeout(() => {
+            if (prepareTimeoutRef.current) {
+                clearTimeout(prepareTimeoutRef.current);
+            }
+            prepareTimeoutRef.current = setTimeout(() => {
+                prepareTimeoutRef.current = null;
+                if (mediaRecorderRef.current !== mediaRecorder || mediaRecorder.state === 'inactive') {
+                    return;
+                }
                 setIsPreparing(false);
                 setIsRecording(true);
             }, 1500);
 
         } catch (err) {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
             console.error('Failed to start recording:', err);
-            toast.error('Failed to access microphone: ' + err.message);
+            toast.error(err?.name === 'NotAllowedError'
+                ? 'Microphone blocked — allow Quilly in Windows microphone privacy settings.'
+                : 'Failed to access microphone: ' + err.message);
+            window.electronAPI?.recordingStartFailed?.(err?.name, err?.message)?.catch?.(() => {});
             setIsPreparing(false);
+            setIsRecording(false);
         }
     }, [getAudioContext, onRecordingComplete, selectedDeviceId]);
 
     const stopRecording = useCallback(() => {
-        if (mediaRecorderRef.current && isRecording) {
-            mediaRecorderRef.current.stop();
-            setIsRecording(false);
+        if (prepareTimeoutRef.current) {
+            clearTimeout(prepareTimeoutRef.current);
+            prepareTimeoutRef.current = null;
         }
-    }, [isRecording]);
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        setIsPreparing(false);
+        setIsRecording(false);
+    }, []);
 
     // Recording elapsed timer
     useEffect(() => {
@@ -758,7 +862,10 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
             // Decode the new audio
             const arrayBuffer = await audioBlob.arrayBuffer();
             const audioCtx = await getAudioContext();
-            const newBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            const newBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+            if (!Number.isFinite(newBuffer.duration) || newBuffer.duration <= 0) {
+                throw new Error('Audio file has no playable duration');
+            }
 
             if (!originalAudioBufferRef.current) {
                 // First audio — initialize the editor with this buffer
@@ -777,6 +884,7 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                 setSegments(newSegments);
                 setSelectedSegmentIndex(0);
                 setDuration(newBuffer.duration);
+                setHasAudio(true);
 
                 // Load into wavesurfer
                 const url = URL.createObjectURL(blob);
@@ -924,16 +1032,20 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                     const arrayBuffer = await file.arrayBuffer();
                     const audioCtx = await getAudioContext();
                     const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+                    if (!Number.isFinite(decodedBuffer.duration) || decodedBuffer.duration <= 0) {
+                        throw new Error('Audio file has no playable duration');
+                    }
                     originalAudioBufferRef.current = decodedBuffer;
                     currentAudioBufferRef.current = decodedBuffer;
 
-                    // Create blob from the already-read buffer (avoid reading file twice)
-                    const blob = new Blob([arrayBuffer], { type: file.type });
+                    const blob = audioBufferToWavBlob(decodedBuffer);
                     internalBlobRef.current = blob;
 
-                    const url = URL.createObjectURL(file);
+                    const url = URL.createObjectURL(blob);
                     await wavesurferRef.current.load(url);
                     URL.revokeObjectURL(url);
+                    setDuration(decodedBuffer.duration);
+                    setHasAudio(true);
 
                     // Initialize segments for imported audio
                     setSegments([{
@@ -951,7 +1063,7 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                     }
                 } catch (err) {
                     console.error('Failed to import audio:', err);
-                    toast.error('Failed to import audio file');
+                    toast.error('Failed to import audio file: ' + err.message);
                 }
             }
         };
@@ -1040,7 +1152,7 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                 // Decode audio buffer
                 const arrayBuffer = await audioBlob.arrayBuffer();
                 const audioCtx = await getAudioContext();
-                const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
                 originalAudioBufferRef.current = decodedBuffer;
                 currentAudioBufferRef.current = decodedBuffer;
                 internalBlobRef.current = audioBlob;
@@ -1107,17 +1219,52 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
         setIsProcessing(false);
     }, [hasAudio, audioBlob, isProcessing]);
 
+    // ---------- diarization speaker view ----------
+
+    const speakerName = (id) =>
+        diarization?.speakerNames?.[String(id)] || `Speaker ${id + 1}`;
+
+    const copyDiarizedTranscript = useCallback(async () => {
+        if (!diarization?.segments?.length) return;
+        // Same "Name: text" block format as electron/diarizationMerge.cjs —
+        // duplicated because electron CJS modules aren't importable from Vite.
+        const text = diarization.segments
+            .map(s => `${diarization.speakerNames?.[String(s.speaker)] || `Speaker ${s.speaker + 1}`}: ${s.text}`)
+            .join('\n\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            toast.success('Speaker transcript copied');
+        } catch (err) {
+            toast.error('Copy failed: ' + err.message);
+        }
+    }, [diarization]);
+
+    const commitSpeakerRename = () => {
+        if (renamingSpeaker && renamingSpeaker.value.trim()) {
+            onRenameSpeaker?.(renamingSpeaker.id, renamingSpeaker.value.trim());
+        }
+        setRenamingSpeaker(null);
+    };
+
     return (
         <div className="audio-editor">
+            {initialTranscript ? (
+                <div className="editor-imported-transcript" title="Transcript from the selected recording">
+                    {initialTranscript}
+                </div>
+            ) : null}
             <div className="device-selector-row">
                 <label htmlFor="mic-select">Microphone:</label>
                 <select
                     id="mic-select"
                     value={selectedDeviceId}
                     onChange={(e) => setSelectedDeviceId(e.target.value)}
+                    onMouseDown={loadDevicesOnce}
+                    onFocus={loadDevicesOnce}
                     disabled={isRecording}
                     className="mic-select"
                 >
+                    <option value="">Default microphone</option>
                     {audioDevices.map(device => (
                         <option key={device.deviceId} value={device.deviceId}>
                             {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
@@ -1133,6 +1280,12 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                     🔄
                 </button>
             </div>
+            {isWindowsStore && !devicesLoaded ? (
+                <p className="device-selector-note">
+                    Windows may ask about camera access while listing microphones.
+                    Quilly never uses your camera. It's safe to choose No.
+                </p>
+            ) : null}
 
             <div className="editor-controls-row">
                 {!isRecording && !isPreparing ? (
@@ -1406,6 +1559,61 @@ const AudioEditor = forwardRef(({ audioBlob, onTranscribe, onProcess, onRecordin
                     </>
                 )}
             </div>
+
+            {diarization?.segments?.length > 0 && (
+                <div className="speaker-view">
+                    <div className="speaker-view-header">
+                        <h4>Speakers</h4>
+                        <button className="tool-btn" onClick={copyDiarizedTranscript} title="Copy speaker transcript">
+                            📋 Copy transcript
+                        </button>
+                    </div>
+                    <div className="speaker-view-list">
+                        {diarization.segments.map((seg, i) => (
+                            <div
+                                key={i}
+                                className="speaker-segment"
+                                onClick={() => wavesurferRef.current?.setTime(seg.start)}
+                                title="Click to jump audio here"
+                            >
+                                {/* Match the clicked row (segIdx), not the speaker id — a
+                                    speaker spans many rows and duplicate autoFocus inputs
+                                    steal focus from the clicked one. */}
+                                {renamingSpeaker?.segIdx === i ? (
+                                    <input
+                                        className="speaker-chip-input"
+                                        value={renamingSpeaker.value}
+                                        autoFocus
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => setRenamingSpeaker(prev => ({ ...prev, value: e.target.value }))}
+                                        onBlur={commitSpeakerRename}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') commitSpeakerRename();
+                                            if (e.key === 'Escape') setRenamingSpeaker(null);
+                                        }}
+                                    />
+                                ) : (
+                                    <span
+                                        className="speaker-chip"
+                                        style={{ background: speakerColor(seg.speaker) }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setRenamingSpeaker({ id: seg.speaker, segIdx: i, value: speakerName(seg.speaker) });
+                                        }}
+                                        title="Click to rename this speaker"
+                                    >
+                                        {speakerName(seg.speaker)}
+                                    </span>
+                                )}
+                                <span className="speaker-time">
+                                    {formatClock(seg.start)}–{formatClock(seg.end)}
+                                </span>
+                                <p className="speaker-text">{seg.text}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <InsertAudioModal
                 isOpen={isInsertModalOpen}

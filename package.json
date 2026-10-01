@@ -1,7 +1,7 @@
 {
   "name": "quilly",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.8.0",
   "description": "Voice to Text Desktop App - Talk more, type less",
   "author": "Alfredo Rapetta (A.I.P.S. — https://aips.studio)",
   "homepage": "https://aips.studio",
@@ -18,12 +18,14 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test electron/*.test.cjs",
+    "test": "node --test electron/*.test.cjs src/**/*.test.cjs",
     "preview": "vite preview",
     "electron": "electron .",
     "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:9500 && electron .\"",
     "dist": "npm run build && electron-builder --win",
-    "dist:dir": "npm run build && electron-builder --win --dir"
+    "dist:store": "npm run build && electron-builder --win appx",
+    "dist:dir": "npm run build && electron-builder --win --dir",
+    "dist:mac": "npm run build && electron-builder --mac"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
@@ -56,7 +58,7 @@
   "build": {
     "appId": "com.quilly.app",
     "productName": "Quilly",
-    "copyright": "Copyright © 2026 Alfredo Rapetta (A.I.P.S.)",
+    "copyright": "Copyright © 2026 ARTRs pro AB (A.I.P.S.)",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -75,20 +77,31 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "public/icon.ico",
       "executableName": "Quilly",
-      "artifactName": "${productName}-V-${version}-Portable.${ext}"
+      "artifactName": "${productName}-V-${version}-Setup.${ext}"
+    },
+    "appx": {
+      "applicationId": "Quilly",
+      "identityName": "ARTRspro.QuillyVoicetoText",
+      "publisher": "CN=63F43DB7-11B5-4738-9F40-D6C6BDB19B18",
+      "publisherDisplayName": "ARTRs pro",
+      "displayName": "Quilly Voice to Text",
+      "backgroundColor": "transparent",
+      "minVersion": "10.0.17763.0",
+      "maxVersionTested": "10.0.26100.0",
+      "languages": [
+        "en-US"
+      ],
+      "capabilities": [
+        "runFullTrust",
+        "microphone"
+      ],
+      "artifactName": "${productName}-V-${version}-Store.${ext}"
     },
     "nsis": {
-      "artifactName": "${productName}-V-${version}-Setup.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
@@ -99,6 +112,31 @@
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "license": "LICENSE.txt"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "public/icon-mac.png",
+      "identity": null,
+      "darkModeSupport": true,
+      "artifactName": "${productName}-V-${version}-macOS-${arch}.${ext}",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Quilly needs microphone access to transcribe your speech.",
+        "NSAppleEventsUsageDescription": "Quilly uses System Events to paste transcribed text into the app you're working in."
+      }
     }
   }
 }

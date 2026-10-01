@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import './SettingsModal.css';
 import LlmSettingsSection from './LlmSettingsSection';
+import DeveloperSettingsSection from './DeveloperSettingsSection';
+import AboutSection from './AboutSection';
 
 const LANGUAGE_OPTIONS = [
     { code: 'auto', label: 'Auto-detect' },
@@ -60,6 +62,7 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
     const [llmModels, setLlmModels] = useState({});
     // OUT-02: Review-first mode toggle
     const [reviewFirstMode, setReviewFirstMode] = useState(false);
+    const [autoDiarizeEnabled, setAutoDiarizeEnabled] = useState(false);
     // Model preference: 'auto', '4b', '9b'
     const [llmModelPreference, setLlmModelPreference] = useState('auto');
     // Hotkeys
@@ -67,6 +70,7 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
     const [hotkeyLlm, setHotkeyLlm] = useState('CommandOrControl+Alt+P');
     const [hotkeyRecording, setHotkeyRecording] = useState(null); // which hotkey is currently being recorded
     const [hotkeyError, setHotkeyError] = useState(null);
+    const [finalTranscriptCleanupEnabled, setFinalTranscriptCleanupEnabled] = useState(false);
 
     // GPU detection & backend state
     const [gpuInfo, setGpuInfo] = useState(null);
@@ -95,14 +99,21 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
                 llmSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
             setHighlightLlm(true);
-            // Clear highlight after 3 seconds
-            const fadeTimer = setTimeout(() => setHighlightLlm(false), 3000);
             // Consume the deep-link flag so reopening modal does not re-trigger
             onDeepLinkConsumed?.();
-            return () => clearTimeout(fadeTimer);
         }, 300);
         return () => clearTimeout(timer);
     }, [isOpen, deepLinkLlm, onDeepLinkConsumed]);
+
+    // Fade the highlight 3s after it turns on. This lives in its OWN effect:
+    // consuming the deep-link flag above re-runs that effect, and a fade timer
+    // owned by it would be cancelled by that re-run — leaving the highlight
+    // stuck on for the rest of the session.
+    useEffect(() => {
+        if (!highlightLlm) return;
+        const fadeTimer = setTimeout(() => setHighlightLlm(false), 3000);
+        return () => clearTimeout(fadeTimer);
+    }, [highlightLlm]);
 
     // Listen for download progress events
     useEffect(() => {
@@ -139,11 +150,13 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
             setLlmModels(modelStatus || {});
             // OUT-02: Review-first mode
             setReviewFirstMode(settings.reviewFirstMode || false);
+            setAutoDiarizeEnabled(settings.autoDiarizeEnabled || false);
             // Model preference
             setLlmModelPreference(settings.llmModelPreference || 'auto');
             // Hotkeys
             setHotkeyTranscribe(settings.hotkeyTranscribe || 'CommandOrControl+Alt+V');
             setHotkeyLlm(settings.hotkeyLlm || 'CommandOrControl+Alt+P');
+            setFinalTranscriptCleanupEnabled(settings.finalTranscriptCleanupEnabled || false);
             setHotkeyError(null);
         } catch {
             setError('Failed to load settings');
@@ -177,13 +190,16 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
         return result;
     };
 
-    const handleBackendSetup = async () => {
+    const handleBackendSetup = async (modelIdOverride = null) => {
+        // Note: when used as an onClick handler the first arg is the click
+        // event — only honor explicit string overrides.
+        const targetModel = typeof modelIdOverride === 'string' ? modelIdOverride : currentModel;
         setCppSetupRunning(true);
         setCppProgress(null);
         setError(null);
         try {
             const result = await window.electronAPI.whisperCppSetup({
-                modelId: currentModel,
+                modelId: targetModel,
                 backend: selectedBackend,
             });
             if (result.success) {
@@ -212,6 +228,13 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
                 setCurrentModel(modelId);
                 const status = await window.electronAPI.whisperCppStatus?.();
                 if (status) setCppStatus(status);
+                // The chosen model may need an engine binary the current
+                // install lacks (Parakeet needs parakeet-cli.exe, shipped in
+                // whisper.cpp ≥ v1.9.0). Run setup right away instead of
+                // leaving a selected-but-dead model.
+                if (status && !status.binaryInstalled && !cppSetupRunning) {
+                    await handleBackendSetup(modelId);
+                }
             } else {
                 setError(result.error || 'Failed to change model');
             }
@@ -263,9 +286,33 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
         }
     };
 
+    const handleToggleFinalTranscriptCleanup = async () => {
+        const newValue = !finalTranscriptCleanupEnabled;
+        try {
+            await window.electronAPI.setSetting('finalTranscriptCleanupEnabled', newValue);
+            setFinalTranscriptCleanupEnabled(newValue);
+        } catch {
+            setError('Failed to save final cleanup setting');
+        }
+    };
+
+    const handleToggleAutoDiarize = async () => {
+        const newValue = !autoDiarizeEnabled;
+        try {
+            await window.electronAPI.setSetting('autoDiarizeEnabled', newValue);
+            setAutoDiarizeEnabled(newValue);
+        } catch {
+            setError('Failed to save speaker detection setting');
+        }
+    };
+
     /**
      * Convert a KeyboardEvent to an Electron accelerator string.
      * e.g., Ctrl+Alt+V, CommandOrControl+Shift+P
+     *
+     * Returns a uniform { accel, error } shape: modifier-only presses give
+     * { accel: null, error: null } (keep waiting), rejected combos give an
+     * error message, complete combos give the accelerator string.
      */
     const keyEventToAccelerator = (e) => {
         const parts = [];
@@ -275,7 +322,18 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
 
         // Map key to Electron accelerator name
         const key = e.key;
-        if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return null; // modifier-only, not complete
+        if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) {
+            return { accel: null, error: null }; // modifier-only, not complete
+        }
+
+        // A bare key (or Shift+key) would be registered as a GLOBAL shortcut and
+        // hijack normal typing system-wide — e.g. pressing Enter to "confirm"
+        // would swallow Enter in every app. Require Ctrl/Cmd/Alt, except for
+        // function keys which are safe to bind alone.
+        const isFunctionKey = /^F([1-9]|1\d|2[0-4])$/.test(key);
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && !isFunctionKey) {
+            return { accel: null, error: 'Include Ctrl or Alt (function keys may be used alone)' };
+        }
 
         // Map special keys
         const keyMap = {
@@ -286,7 +344,7 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
         };
         const mappedKey = keyMap[key] || (key.length === 1 ? key.toUpperCase() : key);
         parts.push(mappedKey);
-        return parts.join('+');
+        return { accel: parts.join('+'), error: null };
     };
 
     /**
@@ -303,8 +361,20 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
     const handleHotkeyKeyDown = (e, which) => {
         e.preventDefault();
         e.stopPropagation();
-        const accel = keyEventToAccelerator(e);
+        const { accel, error } = keyEventToAccelerator(e);
+        if (error) {
+            setHotkeyError(error);
+            return;
+        }
         if (!accel) return; // modifier-only press, wait for full combo
+
+        // Both hotkeys sharing one accelerator would leave the second dead —
+        // globalShortcut.register silently fails on an already-taken combo.
+        const otherAccel = which === 'transcribe' ? hotkeyLlm : hotkeyTranscribe;
+        if (accel === otherAccel) {
+            setHotkeyError('That combination is already used by the other hotkey');
+            return;
+        }
 
         // Save immediately
         const setter = which === 'transcribe' ? setHotkeyTranscribe : setHotkeyLlm;
@@ -356,6 +426,7 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
     const isReady = cppStatus?.available;
     const installedBackend = cppStatus?.installedBackend;
     const needsSwitch = installedBackend && selectedBackend !== installedBackend;
+    const hasInstalledMainModel = Object.values(llmModels || {}).some(model => model.installed);
 
     if (!isOpen) return null;
 
@@ -411,6 +482,36 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
                     </section>
 
                     {/* AI Processing Section — LLM enable/disable, model manager, and GPU/CPU mode */}
+                    <section className="settings-section live-draft-section">
+                        <div className="live-draft-settings-row final-cleanup-settings-row">
+                            <div className="live-draft-label-group">
+                                <span className="live-draft-label">Improve final transcript</span>
+                                <span className="live-draft-description">
+                                    After full Whisper transcription, add local structure and use your main AI model when available
+                                </span>
+                                {finalTranscriptCleanupEnabled && !llmEnabled && (
+                                    <span className="final-cleanup-hint">
+                                        Enable AI Processing below so the cleanup model can run.
+                                    </span>
+                                )}
+                                {finalTranscriptCleanupEnabled && llmEnabled && !hasInstalledMainModel && (
+                                    <span className="final-cleanup-hint">
+                                        Download Fast or Quality under Local Models to add AI cleanup.
+                                    </span>
+                                )}
+                            </div>
+                            <button
+                                className={`llm-switch ${finalTranscriptCleanupEnabled ? 'llm-switch--on' : ''}`}
+                                role="switch"
+                                aria-checked={finalTranscriptCleanupEnabled}
+                                onClick={handleToggleFinalTranscriptCleanup}
+                                type="button"
+                            >
+                                <span className="llm-switch-thumb" />
+                            </button>
+                        </div>
+                    </section>
+
                     <div ref={llmSectionRef}>
                         <LlmSettingsSection
                             llmEnabled={llmEnabled}
@@ -450,6 +551,28 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
                         </section>
                     )}
 
+                    {/* Speaker diarization: auto-detect toggle (independent of LLM) */}
+                    <section className="settings-section review-first-section">
+                        <div className="review-first-row">
+                            <div className="review-first-label-group">
+                                <span className="review-first-label">Auto-detect speakers on new recordings</span>
+                                <span className="review-first-description">
+                                    After each recording is transcribed, identify who spoke when in the background
+                                    (needs the speaker engine downloaded once via the 👥 action)
+                                </span>
+                            </div>
+                            <button
+                                className={`llm-switch ${autoDiarizeEnabled ? 'llm-switch--on' : ''}`}
+                                role="switch"
+                                aria-checked={autoDiarizeEnabled}
+                                onClick={handleToggleAutoDiarize}
+                                type="button"
+                            >
+                                <span className="llm-switch-thumb" />
+                            </button>
+                        </div>
+                    </section>
+
                     {/* Model Preference — only shown when LLM is enabled */}
                     {llmEnabled && (
                         <section className="settings-section model-preference-section">
@@ -472,6 +595,7 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
                                     <option value="auto">Auto</option>
                                     <option value="9b">Quality (9B){llmModels['qwen3.5-9b']?.installed ? '' : ' — not downloaded'}</option>
                                     <option value="4b">Fast (4B){llmModels['qwen3.5-4b']?.installed ? '' : ' — not downloaded'}</option>
+                                    <option value="35b">Max (35B MoE, 32GB+ RAM){llmModels['qwen3.6-35b-a3b']?.installed ? '' : ' — not downloaded'}</option>
                                 </select>
                             </div>
                         </section>
@@ -631,6 +755,10 @@ function SettingsModal({ isOpen, onClose, deepLinkLlm, onDeepLinkConsumed }) {
                             )}
                         </div>
                     </section>
+
+                    <DeveloperSettingsSection llmModels={llmModels} />
+
+                    <AboutSection />
                 </div>
 
                 <div className="modal-footer">

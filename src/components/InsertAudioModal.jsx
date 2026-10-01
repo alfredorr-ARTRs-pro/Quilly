@@ -1,6 +1,29 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { toast } from './Toast';
 import './InsertAudioModal.css';
+
+const RECORDING_MIME_TYPES = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+];
+
+function createSupportedMediaRecorder(stream) {
+    const MediaRecorderCtor = globalThis.MediaRecorder;
+    if (!MediaRecorderCtor) {
+        throw new Error('Audio recording is not available in this window');
+    }
+
+    const mimeType = typeof MediaRecorderCtor.isTypeSupported === 'function'
+        ? RECORDING_MIME_TYPES.find(type => MediaRecorderCtor.isTypeSupported(type))
+        : '';
+
+    return mimeType
+        ? new MediaRecorderCtor(stream, { mimeType })
+        : new MediaRecorderCtor(stream);
+}
 
 function InsertAudioModal({
     isOpen,
@@ -86,7 +109,13 @@ function InsertAudioModal({
     };
 
     const startRecording = async () => {
+        let stream = null;
         try {
+            const mediaDevices = globalThis.navigator?.mediaDevices;
+            if (!mediaDevices?.getUserMedia) {
+                throw new Error('Microphone access is not available in this window');
+            }
+
             const constraints = {
                 audio: {
                     echoCancellation: false,
@@ -96,11 +125,11 @@ function InsertAudioModal({
                 },
             };
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            stream = await mediaDevices.getUserMedia(constraints);
             streamRef.current = stream;
             chunksRef.current = [];
 
-            const mediaRecorder = new MediaRecorder(stream);
+            const mediaRecorder = createSupportedMediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
 
             mediaRecorder.ondataavailable = (e) => {
@@ -110,8 +139,13 @@ function InsertAudioModal({
             };
 
             mediaRecorder.onstop = () => {
-                const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-                setRecordedBlob(blob);
+                const recordedType = mediaRecorder.mimeType || chunksRef.current[0]?.type || 'audio/webm';
+                const blob = new Blob(chunksRef.current, { type: recordedType });
+                if (blob.size === 0) {
+                    toast.error('Recording did not capture any audio');
+                } else {
+                    setRecordedBlob(blob);
+                }
                 if (streamRef.current) {
                     streamRef.current.getTracks().forEach(track => track.stop());
                     streamRef.current = null;
@@ -129,7 +163,13 @@ function InsertAudioModal({
                 setRecordingDuration((Date.now() - startTime) / 1000);
             }, 100);
         } catch (err) {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            streamRef.current = null;
+            setIsRecording(false);
             console.error('Failed to start recording:', err);
+            toast.error('Failed to access microphone: ' + err.message);
         }
     };
 
@@ -244,6 +284,7 @@ function InsertAudioModal({
                                     onChange={(e) => onDeviceChange(e.target.value)}
                                     disabled={isRecording}
                                 >
+                                    <option value="">Default microphone</option>
                                     {audioDevices.map(device => (
                                         <option key={device.deviceId} value={device.deviceId}>
                                             {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}

@@ -69,19 +69,33 @@ class StorageService {
     }
 
     delete(id) {
-        this.recordings = this.recordings.filter(r => r.id !== id);
-        this.save();
+        this.deleteMultiple([id]);
     }
 
     deleteMultiple(ids) {
         const idSet = new Set(ids);
+        const removed = this.recordings.filter(r => idSet.has(r.id));
         this.recordings = this.recordings.filter(r => !idSet.has(r.id));
         this.save();
+        this.deleteOrphanedAudio(removed);
     }
 
     clearAll() {
+        const removed = this.recordings;
         this.recordings = [];
         this.save();
+        this.deleteOrphanedAudio(removed);
+    }
+
+    // Remove the audio files of deleted entries from disk, unless another
+    // remaining entry still points at the same file (e.g. after Edit/Retry).
+    deleteOrphanedAudio(removed) {
+        const inUse = new Set(this.recordings.map(r => r.audioPath).filter(Boolean));
+        for (const r of removed) {
+            if (r.audioPath && !inUse.has(r.audioPath)) {
+                window.electronAPI?.deleteAudioFile?.(r.audioPath)?.catch?.(() => {});
+            }
+        }
     }
 
     search(query) {

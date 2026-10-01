@@ -19,7 +19,11 @@ function FirstRunModal() {
             const settings = await window.electronAPI.getSettings();
             if (!settings.firstRunComplete) {
                 const availableModels = await window.electronAPI.getAvailableModels();
-                setModels(availableModels);
+                // Parakeet needs the whisper.cpp backend set up first (Settings →
+                // GPU Backend) — on a fresh install its "downloaded automatically
+                // on first transcription" promise below would be false, so it is
+                // not offered here.
+                setModels(availableModels.filter(m => !m.id.includes('parakeet')));
                 setIsOpen(true);
             }
         } catch (err) {
