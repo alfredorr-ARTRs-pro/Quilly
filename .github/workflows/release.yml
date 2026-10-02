@@ -90,6 +90,10 @@ jobs:
 
             ### Windows
 
+            **Easiest:** get Quilly from the [Microsoft Store](https://apps.microsoft.com/detail/9PFHD727T69M?mode=direct). No security warning, and updates install automatically. The Store version may arrive a day or two after this release while Microsoft reviews it.
+
+            Or use the installer:
+
             1. Download the `.exe` installer attached below
             2. Run the installer
             3. If Windows SmartScreen warns, click **More info → Run anyway** (the installer isn't code-signed yet — see [README](https://github.com/alfredorr-ARTRs-pro/Quilly#about-the-smartscreen-warning) for details)

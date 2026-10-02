@@ -17,6 +17,12 @@
 </p>
 
 <p align="center">
+  <a href="https://apps.microsoft.com/detail/9PFHD727T69M?mode=direct">
+    <img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get it from Microsoft" width="200" />
+  </a>
+</p>
+
+<p align="center">
   <img src="docs/images/hero.png" alt="Quilly floating indicator in action" width="720" />
 </p>
 
@@ -86,9 +92,15 @@ All hotkeys are customizable in Settings → Hotkeys.
 
 > **Requires Windows 10 or 11 (64-bit).**
 
+**Recommended: Microsoft Store.** Install **[Quilly Voice to Text](https://apps.microsoft.com/detail/9PFHD727T69M?mode=direct)** in one click. It's signed by Microsoft, so there's no security warning, and Windows keeps it up to date automatically.
+
+**Alternative: installer from GitHub.**
+
 1. Go to the **[Releases page](https://github.com/alfredorr-ARTRs-pro/Quilly/releases)**
 2. Download `Quilly-V-X.X.X-Setup.exe` (latest version)
-3. Run the installer
+3. Run the installer (see the SmartScreen note below)
+
+This version tells you when a new release is out (Settings → About & Updates).
 
 ### macOS
 
@@ -102,7 +114,7 @@ Full walkthrough incl. Gatekeeper and permissions: **[macOS Install Guide](docs/
 
 ### About the SmartScreen warning
 
-The installer isn't code-signed yet (free open-source signing via [SignPath Foundation](https://signpath.org) is being set up). Windows will show:
+This only applies to the GitHub installer; the [Microsoft Store version](https://apps.microsoft.com/detail/9PFHD727T69M?mode=direct) never shows it. The installer isn't code-signed yet (free open-source signing via [SignPath Foundation](https://signpath.org) is being set up). Windows will show:
 
 > **Windows protected your PC**
 > Microsoft Defender SmartScreen prevented an unrecognized app from starting.
@@ -189,7 +201,7 @@ Deep dive on models, sizing, and GPU setup: **[AI Setup Guide](docs/ai-setup.md)
 
 - **All processing is on your device.** Transcription and language modeling never leave your computer.
 - **No telemetry, no analytics, no accounts.**
-- **The only network calls** Quilly makes are downloading AI model files from their official repositories (HuggingFace) the first time you enable a model.
+- **The only network calls** Quilly makes are downloading AI models (from Hugging Face) and speech/AI engines (from GitHub) the first time you enable them, plus a once-a-day update check in the GitHub version, which you can turn off. Details in the **[Privacy Policy](PRIVACY_POLICY.md)**.
 - **Your voice recordings** are stored locally in your user data folder (`AppData` on Windows, `~/Library/Application Support` on macOS). Delete them anytime from Dashboard → History.
 - **Open source** — [inspect the code yourself](https://github.com/alfredorr-ARTRs-pro/Quilly).
 
@@ -282,7 +294,7 @@ The companies behind Quilly:
 ## Roadmap
 
 - Code-signed installer (SignPath Foundation application in progress)
-- In-app auto-updates
+- AMD and Intel GPU acceleration (Vulkan)
 - Linux support
 - Custom AI prompt templates
 - Multi-language wake-word support
